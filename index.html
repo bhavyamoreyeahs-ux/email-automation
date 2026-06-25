@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Automation Journey</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <div>
+            <strong>MoreYeahs</strong>
+            <span>AI Email Automation</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a class="active" href="index.html">Journey Home</a>
+          <details class="nav-dropdown" open>
+            <summary>Campaign Studio</summary>
+            <a href="setup.html">Setup</a>
+            <a href="mailbox.html">Mailbox</a>
+            <a href="audience.html">Audience</a>
+            <a href="campaign.html">Campaign</a>
+            <a href="launch.html">Launch</a>
+          </details>
+          <a href="dashboard.html">Dashboard</a>
+          <a href="inbox.html">Inbox</a>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Guided journey</span>
+            <h1>Continue your email automation setup.</h1>
+          </div>
+          <div class="topbar-actions">
+            <a class="ghost-button" href="login.html">Switch workspace</a>
+          </div>
+        </header>
+
+        <section class="journey-home-grid">
+          <a class="journey-home-card" data-step-card="setup" href="setup.html">
+            <span>1</span>
+            <strong>Setup</strong>
+            <p>Add your real offer, audience, proof points, and sender identity.</p>
+          </a>
+          <a class="journey-home-card" data-step-card="mailbox" href="mailbox.html">
+            <span>2</span>
+            <strong>Mailbox</strong>
+            <p>Connect SMTP before real sending.</p>
+          </a>
+          <a class="journey-home-card" data-step-card="audience" href="audience.html">
+            <span>3</span>
+            <strong>Audience</strong>
+            <p>Import contacts with country, continent, status, and consent.</p>
+          </a>
+          <a class="journey-home-card" data-step-card="campaign" href="campaign.html">
+            <span>4</span>
+            <strong>Campaign</strong>
+            <p>Generate, edit, test, and control follow-ups.</p>
+          </a>
+          <a class="journey-home-card" data-step-card="launch" href="launch.html">
+            <span>5</span>
+            <strong>Launch</strong>
+            <p>Choose segment, cap sends, and push follow-ups when ready.</p>
+          </a>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="flow.js"></script>
+  </body>
+</html>

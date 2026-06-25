@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Mailbox - Email Automation</title><link rel="stylesheet" href="styles.css" /></head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar"><div class="brand"><div class="brand-mark">M</div><div><strong>MoreYeahs</strong><span>AI Email Automation</span></div></div><nav class="nav-list"><a href="index.html">Journey Home</a><details class="nav-dropdown" open><summary>Campaign Studio</summary><a href="setup.html">Setup</a><a class="active" href="mailbox.html">Mailbox</a><a href="audience.html">Audience</a><a href="campaign.html">Campaign</a><a href="launch.html">Launch</a></details><a href="dashboard.html">Dashboard</a><a href="inbox.html">Inbox</a></nav></aside>
+      <main class="workspace narrow-workspace">
+        <header class="topbar"><div><span class="eyebrow">Step 3</span><h1>Connect your sending mailbox.</h1></div><div class="topbar-actions"><a class="ghost-button" href="audience.html">Next: Audience</a></div></header>
+        <section class="panel">
+          <form id="mailboxForm" class="campaign-form">
+            <label>SMTP host<input id="smtpHostInput" type="text" placeholder="smtp.gmail.com" required /></label>
+            <label>Port<input id="smtpPortInput" type="number" value="587" required /></label>
+            <label>Username<input id="smtpUserInput" type="email" placeholder="you@company.com" required /></label>
+            <label>App password<input id="smtpPasswordInput" type="password" placeholder="Use an app password" required /></label>
+            <label>From name<input id="fromNameInput" type="text" placeholder="Your team" /></label>
+            <label>From email<input id="fromEmailInput" type="email" placeholder="sender@company.com" /></label>
+            <label>Reply-to<input id="replyToInput" type="email" placeholder="reply@company.com" /></label>
+            <label>Company address<input id="companyAddressInput" type="text" placeholder="Postal address for footer compliance" /></label>
+            <label class="checkbox-inline full-span"><input id="smtpSecureInput" type="checkbox" /> Use TLS/SSL, usually for port 465</label>
+            <button class="primary-button full-span" type="submit">Verify and save mailbox</button>
+          </form>
+          <p class="muted small" id="mailConnectionStatus">Mailbox is not connected yet.</p>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="flow.js"></script>
+  </body>
+</html>

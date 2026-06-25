@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - Email Automation</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="standalone-page">
+      <section class="login-card">
+        <div class="brand login-brand">
+          <div class="brand-mark">M</div>
+          <div>
+            <strong>MoreYeahs</strong>
+            <span>AI Email Automation</span>
+          </div>
+        </div>
+        <div>
+          <span class="eyebrow">Step 1</span>
+          <h1>Login to your workspace.</h1>
+          <p class="muted">This prototype uses a local browser session. No password is required.</p>
+        </div>
+        <form class="login-form" id="loginForm">
+          <label>
+            Work email
+            <input id="loginEmailInput" type="email" placeholder="you@company.com" autocomplete="email" required />
+          </label>
+          <label>
+            Workspace name
+            <input id="workspaceNameInput" type="text" placeholder="Your company or campaign workspace" required />
+          </label>
+          <button class="primary-button full-width-button" type="submit">Continue to setup</button>
+        </form>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="flow.js"></script>
+  </body>
+</html>

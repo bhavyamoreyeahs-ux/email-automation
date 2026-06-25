@@ -1,0 +1,21 @@
+{
+  "name": "automated-email-ai-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "start": "node server.js",
+    "automation": "node server.js",
+    "preview": "vite preview --host 127.0.0.1",
+    "check": "node --check app.js && node --check server.js"
+  },
+  "devDependencies": {
+    "vite": "latest"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "nodemailer": "^9.0.1"
+  }
+}

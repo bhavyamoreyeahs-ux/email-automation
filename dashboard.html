@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Automation Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <div>
+            <strong>MoreYeahs</strong>
+            <span>AI Email Automation</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a href="index.html">Journey Home</a>
+          <details class="nav-dropdown">
+            <summary>Campaign Studio</summary>
+            <a href="setup.html">Setup</a>
+            <a href="mailbox.html">Mailbox</a>
+            <a href="audience.html">Audience</a>
+            <a href="campaign.html">Campaign</a>
+            <a href="launch.html">Launch</a>
+          </details>
+          <a class="active" href="dashboard.html">Dashboard</a>
+          <a href="inbox.html">Inbox</a>
+        </nav>
+
+        <div class="sidebar-panel">
+          <span class="eyebrow">Analytics</span>
+          <strong id="dashboardTotalSent">0</strong>
+          <p>Real sends, reverts, sales-forwarded leads, and continent distribution.</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Campaign intelligence</span>
+            <h1>Email performance by geography and outcome.</h1>
+          </div>
+          <div class="topbar-actions">
+            <a class="ghost-button" href="launch.html">Back to launch</a>
+            <button class="primary-button" id="refreshDashboardButton" type="button">Refresh dashboard</button>
+          </div>
+        </header>
+
+        <section class="status-strip dashboard-stats" aria-label="Dashboard totals">
+          <article>
+            <span>Contacts</span>
+            <strong id="totalContacts">0</strong>
+          </article>
+          <article>
+            <span>Sent emails</span>
+            <strong id="totalSent">0</strong>
+          </article>
+          <article>
+            <span>Reverts</span>
+            <strong id="totalReverts">0</strong>
+          </article>
+          <article>
+            <span>Forwarded to sales</span>
+            <strong id="totalConverted">0</strong>
+          </article>
+        </section>
+
+        <section class="dashboard-grid">
+          <article class="panel chart-panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Outcomes</span>
+                <h2>Sent vs reverts vs sales-forwarded leads</h2>
+              </div>
+            </div>
+            <div class="pie-layout">
+              <div class="pie-chart" id="outcomePie" aria-label="Outcome pie chart"></div>
+              <div class="chart-legend" id="outcomeLegend"></div>
+            </div>
+          </article>
+
+          <article class="panel chart-panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Reach</span>
+                <h2>Emails by continent</h2>
+              </div>
+            </div>
+            <div class="pie-layout">
+              <div class="pie-chart" id="continentPie" aria-label="Continent pie chart"></div>
+              <div class="chart-legend" id="continentLegend"></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="dashboard-grid wide">
+          <article class="panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Geography</span>
+                <h2>Continent bifurcation</h2>
+              </div>
+            </div>
+            <div class="continent-list" id="continentList"></div>
+          </article>
+
+          <article class="panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Timeline</span>
+                <h2>Recent activity</h2>
+              </div>
+            </div>
+            <div class="activity-log" id="dashboardActivity"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

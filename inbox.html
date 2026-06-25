@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MoreYeahs AI Inbox</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <div>
+            <strong>MoreYeahs</strong>
+            <span>AI Email Automation</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a href="index.html">Journey Home</a>
+          <details class="nav-dropdown">
+            <summary>Campaign Studio</summary>
+            <a href="setup.html">Setup</a>
+            <a href="mailbox.html">Mailbox</a>
+            <a href="audience.html">Audience</a>
+            <a href="campaign.html">Campaign</a>
+            <a href="launch.html">Launch</a>
+          </details>
+          <a href="dashboard.html">Dashboard</a>
+          <a class="active" href="inbox.html">Inbox</a>
+        </nav>
+
+        <div class="sidebar-panel">
+          <span class="eyebrow">Replies</span>
+          <strong id="inboxCount">0</strong>
+          <p>Manage inbound replies and send a reply draft or manual note.</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Inbox</span>
+            <h1>Manage replies from interested prospects.</h1>
+          </div>
+        </header>
+
+        <section class="automation-grid">
+          <article class="panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Conversations</span>
+                <h2>Messages</h2>
+              </div>
+            </div>
+            <div class="activity-log" id="inboxList"></div>
+          </article>
+
+          <article class="panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Reply</span>
+                <h2>Compose response</h2>
+              </div>
+            </div>
+            <div class="control-stack" id="replyPanel">
+              <p class="muted">Select a message to view and respond.</p>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="inbox.js"></script>
+  </body>
+</html>

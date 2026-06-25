@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Setup - Email Automation</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand"><div class="brand-mark">M</div><div><strong>MoreYeahs</strong><span>AI Email Automation</span></div></div>
+        <nav class="nav-list">
+          <a href="index.html">Journey Home</a>
+          <details class="nav-dropdown" open>
+            <summary>Campaign Studio</summary>
+            <a class="active" href="setup.html">Setup</a>
+            <a href="mailbox.html">Mailbox</a>
+            <a href="audience.html">Audience</a>
+            <a href="campaign.html">Campaign</a>
+            <a href="launch.html">Launch</a>
+          </details>
+          <a href="dashboard.html">Dashboard</a>
+          <a href="inbox.html">Inbox</a>
+        </nav>
+      </aside>
+      <main class="workspace narrow-workspace">
+        <header class="topbar">
+          <div><span class="eyebrow">Step 2</span><h1>Set up the campaign foundation.</h1></div>
+          <div class="topbar-actions"><a class="ghost-button" href="mailbox.html">Skip to mailbox</a></div>
+        </header>
+        <section class="panel">
+          <form id="setupForm" class="campaign-form">
+            <label>Product or offer<input id="offerInput" type="text" placeholder="What are you offering?" required /></label>
+            <label>Target audience<input id="audienceInput" type="text" placeholder="Who should receive this?" required /></label>
+            <label>Campaign goal<select id="goalInput"><option>Book discovery calls</option><option>Promote a webinar</option><option>Nurture cold leads</option><option>Win back inactive buyers</option></select></label>
+            <label>Brand voice<select id="voiceInput"><option>Consultative</option><option>Bold</option><option>Friendly</option><option>Executive</option></select></label>
+            <label class="full-span">Proof points<textarea id="proofInput" rows="5" placeholder="Add real proof points, outcomes, case studies, or differentiators." required></textarea></label>
+            <label>From name<input id="fromNameInput" type="text" placeholder="Sender or team name" /></label>
+            <label>Reply-to email<input id="replyToInput" type="email" placeholder="reply@company.com" /></label>
+            <button class="primary-button full-span" type="submit">Save setup and build campaign</button>
+          </form>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="flow.js"></script>
+  </body>
+</html>

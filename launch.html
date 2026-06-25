@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Launch - Email Automation</title><link rel="stylesheet" href="styles.css" /></head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar"><div class="brand"><div class="brand-mark">M</div><div><strong>MoreYeahs</strong><span>AI Email Automation</span></div></div><nav class="nav-list"><a href="index.html">Journey Home</a><details class="nav-dropdown" open><summary>Campaign Studio</summary><a href="setup.html">Setup</a><a href="mailbox.html">Mailbox</a><a href="audience.html">Audience</a><a href="campaign.html">Campaign</a><a class="active" href="launch.html">Launch</a></details><a href="dashboard.html">Dashboard</a><a href="inbox.html">Inbox</a></nav></aside>
+      <main class="workspace">
+        <header class="topbar"><div><span class="eyebrow">Step 6</span><h1>Launch the opener and control follow-ups.</h1></div><div class="topbar-actions"><a class="ghost-button" href="dashboard.html">View dashboard</a></div></header>
+        <section class="dashboard-grid">
+          <article class="panel">
+            <div class="section-heading"><div><span class="eyebrow">Launch controls</span><h2>Run automation</h2></div><span class="pill" id="providerMode">Simulation mode</span></div>
+            <div class="control-stack">
+              <label>Segment<select id="segmentSelect"><option value="">All active contacts</option><option>Sales priority</option><option>Innovation leaders</option><option>Platform modernization</option><option>Nurture</option></select></label>
+              <label>Send cap<input id="sendLimitInput" min="1" max="100" type="number" value="25" /></label>
+              <button class="primary-button full-width-button" id="runAutomationButton" type="button">Send opener now</button>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="section-heading"><div><span class="eyebrow">Live ops</span><h2>Activity and follow-ups</h2></div><button class="ghost-button compact" id="refreshActivityButton" type="button">Refresh</button></div>
+            <div class="activity-log" id="activityLog"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="flow.js"></script>
+  </body>
+</html>

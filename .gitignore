@@ -1,0 +1,6 @@
+node_modules/
+.runtime/
+.runtime/*.tar.xz
+data/automation-db.json
+.env
+.DS_Store

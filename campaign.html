@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Campaign - Email Automation</title><link rel="stylesheet" href="styles.css" /></head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar"><div class="brand"><div class="brand-mark">M</div><div><strong>MoreYeahs</strong><span>AI Email Automation</span></div></div><nav class="nav-list"><a href="index.html">Journey Home</a><details class="nav-dropdown" open><summary>Campaign Studio</summary><a href="setup.html">Setup</a><a href="mailbox.html">Mailbox</a><a href="audience.html">Audience</a><a class="active" href="campaign.html">Campaign</a><a href="launch.html">Launch</a></details><a href="dashboard.html">Dashboard</a><a href="inbox.html">Inbox</a></nav></aside>
+      <main class="workspace">
+        <header class="topbar"><div><span class="eyebrow">Step 5</span><h1>Review, edit, and test your campaign.</h1></div><div class="topbar-actions"><a class="ghost-button" href="setup.html">Edit setup</a><a class="primary-button" href="launch.html">Next: Launch</a></div></header>
+        <section class="main-grid">
+          <article class="panel">
+            <div class="section-heading"><div><span class="eyebrow">Drafts</span><h2>Email sequence</h2></div><button class="ghost-button compact" id="regenerateCampaignButton" type="button">Regenerate from setup</button></div>
+            <div class="draft-list" id="campaignDraftEditor"></div>
+          </article>
+          <article class="panel">
+            <div class="section-heading"><div><span class="eyebrow">Follow-ups</span><h2>User decides when to push</h2></div></div>
+            <div class="followup-panel">
+              <div class="followup-grid">
+                <label>Email 2<select id="followupOneMode"><option value="manual">Do not queue now</option><option value="delay">Queue after delay</option></select></label>
+                <label>Days after opener<input id="followupOneDays" type="number" min="1" max="60" value="2" /></label>
+                <label>Email 3<select id="followupTwoMode"><option value="manual">Do not queue now</option><option value="delay">Queue after delay</option></select></label>
+                <label>Days after opener<input id="followupTwoDays" type="number" min="1" max="60" value="5" /></label>
+              </div>
+              <p class="muted small">Only the opener sends immediately. Manual follow-ups can be pushed later from Launch.</p>
+            </div>
+            <div class="test-send-card">
+              <div class="mail-connect-head"><div><strong>Controlled test</strong><span>Send only to selected test recipients.</span></div><span class="pill">Test</span></div>
+              <label>Test email IDs<textarea id="testRecipientsInput" rows="5" placeholder="Enter one approved test recipient per line"></textarea></label>
+              <button class="primary-button full-width-button" id="sendTestButton" type="button">Send selected test</button>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="flow.js"></script>
+  </body>
+</html>
