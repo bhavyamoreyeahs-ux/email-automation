@@ -11,8 +11,12 @@ const continentList = document.querySelector("#continentList");
 const dashboardActivity = document.querySelector("#dashboardActivity");
 const refreshDashboardButton = document.querySelector("#refreshDashboardButton");
 const toast = document.querySelector("#toast");
+const localEventsKey = "emailAutomationEvents";
+const localContactsKey = "emailAutomationContacts";
 
 const colors = ["#1f6feb", "#0891b2", "#15803d", "#b45309", "#7c3aed", "#dc2626", "#64748b"];
+const sentTypes = new Set(["sent", "test-sent", "followup-sent"]);
+const simulatedTypes = new Set(["simulation", "test-simulation", "followup-simulation"]);
 
 function showToast(message) {
   toast.textContent = message;
@@ -25,6 +29,42 @@ async function apiFetch(path) {
   const response = await fetch(path);
   if (!response.ok) throw new Error("Dashboard data is unavailable.");
   return response.json();
+}
+
+function getJson(key, fallback = []) {
+  try {
+    return JSON.parse(localStorage.getItem(key)) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function mergeById(primary = [], secondary = []) {
+  const byId = new Map();
+  [...primary, ...secondary].filter((item) => item?.id).forEach((item) => byId.set(item.id, item));
+  return [...byId.values()].sort((a, b) => new Date(b.createdAt || b.scheduledAt || 0) - new Date(a.createdAt || a.scheduledAt || 0));
+}
+
+function isForwarded(contact) {
+  return (
+    contact?.converted === true ||
+    contact?.forwarded === true ||
+    String(contact?.converted || "").toLowerCase() === "true" ||
+    String(contact?.forwarded || "").toLowerCase() === "true" ||
+    /converted|forwarded|sales|qualified|closed lead|lead closed/i.test(contact?.status || contact?.lifecycle || "")
+  );
+}
+
+function inferContinent(contact = {}) {
+  if (contact.continent) return contact.continent;
+  const country = String(contact.country || "").toLowerCase();
+  if (/india|singapore|uae|japan|china|asia/.test(country)) return "Asia";
+  if (/united states|usa|canada|mexico/.test(country)) return "North America";
+  if (/uk|united kingdom|germany|france|netherlands|europe/.test(country)) return "Europe";
+  if (/brazil|argentina|chile|south america/.test(country)) return "South America";
+  if (/australia|new zealand|oceania/.test(country)) return "Oceania";
+  if (/south africa|nigeria|kenya|africa/.test(country)) return "Africa";
+  return "Unspecified";
 }
 
 function formatNumber(value) {
@@ -119,8 +159,41 @@ function renderActivity(events) {
 
 async function loadDashboard() {
   try {
-    const data = await apiFetch("/api/dashboard");
-    const totals = data.totals;
+    const data = await apiFetch("/api/dashboard").catch(() => ({
+      totals: { contacts: 0, sent: 0, simulated: 0, reverts: 0, converted: 0 },
+      continents: [],
+      recentEvents: [],
+    }));
+    const localEvents = getJson(localEventsKey);
+    const localContacts = getJson(localContactsKey);
+    const events = mergeById(data.recentEvents || [], localEvents);
+    const contactMap = new Map(localContacts.map((contact) => [String(contact.email || "").toLowerCase(), contact]));
+    const totals = {
+      contacts: Math.max(Number(data.totals.contacts || 0), localContacts.length),
+      sent: events.filter((event) => sentTypes.has(event.type)).length,
+      simulated: events.filter((event) => simulatedTypes.has(event.type)).length,
+      reverts: Number(data.totals.reverts || 0),
+      converted: Math.max(Number(data.totals.converted || 0), localContacts.filter(isForwarded).length),
+    };
+    const continentMap = new Map();
+    events.forEach((event) => {
+      const contact = contactMap.get(String(event.contactEmail || "").toLowerCase());
+      const continent = inferContinent(contact);
+      const current = continentMap.get(continent) || { continent, sent: 0, simulated: 0, reverts: 0, converted: 0 };
+      if (sentTypes.has(event.type)) current.sent += 1;
+      if (simulatedTypes.has(event.type)) current.simulated += 1;
+      continentMap.set(continent, current);
+    });
+    localContacts.forEach((contact) => {
+      const continent = inferContinent(contact);
+      const current = continentMap.get(continent) || { continent, sent: 0, simulated: 0, reverts: 0, converted: 0 };
+      if (isForwarded(contact)) current.converted += 1;
+      continentMap.set(continent, current);
+    });
+    const continents = continentMap.size
+      ? [...continentMap.values()].sort((a, b) => (b.sent + b.simulated) - (a.sent + a.simulated))
+      : data.continents || [];
+
     totalContacts.textContent = formatNumber(totals.contacts);
     totalSent.textContent = formatNumber(totals.sent);
     totalReverts.textContent = formatNumber(totals.reverts);
@@ -136,10 +209,10 @@ async function loadDashboard() {
     renderPie(
       continentPie,
       continentLegend,
-      data.continents.map((row) => ({ label: row.continent, value: row.sent + row.simulated })),
+      continents.map((row) => ({ label: row.continent, value: row.sent + row.simulated })),
     );
-    renderContinents(data.continents);
-    renderActivity(data.recentEvents);
+    renderContinents(continents);
+    renderActivity(events.slice(0, 12));
   } catch (error) {
     showToast(error.message);
   }

@@ -416,6 +416,7 @@ app.post("/api/automation/run", async (request, response) => {
     .slice(0, Number(request.body.limit || 25));
 
   const results = [];
+  const createdEvents = [];
   for (const contact of selectedContacts) {
     const token = crypto.createHash("sha256").update(`${contact.email}:${campaign.id || campaign.offer}`).digest("hex");
     const result = await sendOrSimulate({
@@ -426,18 +427,20 @@ app.post("/api/automation/run", async (request, response) => {
       runtimeConfig,
     });
     results.push(result);
-    db.events.unshift({
+    const openerEvent = {
       id: makeId("event"),
       type: result.mode,
       contactEmail: contact.email,
       campaignName: campaign.offer,
       subject: result.subject,
       createdAt: new Date().toISOString(),
-    });
+    };
+    db.events.unshift(openerEvent);
+    createdEvents.push(openerEvent);
 
     campaign.emails.slice(1).forEach((email) => {
       if (email.followupMode !== "delay") {
-        db.events.unshift({
+        const manualEvent = {
           id: makeId("event"),
           type: "followup-manual",
           contactEmail: contact.email,
@@ -449,13 +452,15 @@ app.post("/api/automation/run", async (request, response) => {
           contactSnapshot: contact,
           campaignSnapshot: campaign,
           createdAt: new Date().toISOString(),
-        });
+        };
+        db.events.unshift(manualEvent);
+        createdEvents.push(manualEvent);
         return;
       }
 
       const delayDays = Math.min(60, Math.max(1, Number(email.followupDelayDays || 1)));
       const scheduledAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
-      db.events.unshift({
+      const scheduledEvent = {
         id: makeId("event"),
         type: "followup-scheduled",
         contactEmail: contact.email,
@@ -469,12 +474,14 @@ app.post("/api/automation/run", async (request, response) => {
         scheduledAt,
         delayDays,
         createdAt: new Date().toISOString(),
-      });
+      };
+      db.events.unshift(scheduledEvent);
+      createdEvents.push(scheduledEvent);
     });
   }
 
   await writeDb(db);
-  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results });
+  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents });
 });
 
 app.post("/api/followups/:id/push", async (request, response) => {
@@ -580,6 +587,7 @@ app.post("/api/test/send", async (request, response) => {
 
   const results = attempts.map((attempt) => attempt.result).filter(Boolean);
   const failures = attempts.map((attempt) => attempt.failure).filter(Boolean);
+  const createdEvents = attempts.map((attempt) => attempt.event).filter(Boolean);
   attempts
     .map((attempt) => attempt.event)
     .filter(Boolean)
@@ -593,7 +601,7 @@ app.post("/api/test/send", async (request, response) => {
       failures,
     });
   }
-  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results });
+  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents });
 });
 
 app.get("/api/events", async (_request, response) => {

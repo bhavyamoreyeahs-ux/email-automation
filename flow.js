@@ -2,6 +2,8 @@ const toast = document.querySelector("#toast");
 const campaignKey = "emailAutomationCampaign";
 const setupKey = "emailAutomationSetup";
 const sessionKey = "emailAutomationSession";
+const localEventsKey = "emailAutomationEvents";
+const localContactsKey = "emailAutomationContacts";
 const orderedPages = ["setup.html", "mailbox.html", "audience.html", "campaign.html", "launch.html"];
 
 function showToast(message) {
@@ -46,6 +48,24 @@ function getJson(key, fallback = null) {
 
 function setJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function mergeEvents(events = []) {
+  const existing = getJson(localEventsKey, []);
+  const byId = new Map(existing.map((event) => [event.id, event]));
+  events.filter((event) => event?.id).forEach((event) => byId.set(event.id, event));
+  setJson(
+    localEventsKey,
+    [...byId.values()]
+      .sort((a, b) => new Date(b.createdAt || b.scheduledAt || 0) - new Date(a.createdAt || a.scheduledAt || 0))
+      .slice(0, 200),
+  );
+}
+
+function mergedEvents(apiEvents = []) {
+  const byId = new Map();
+  [...apiEvents, ...getJson(localEventsKey, [])].filter((event) => event?.id).forEach((event) => byId.set(event.id, event));
+  return [...byId.values()].sort((a, b) => new Date(b.createdAt || b.scheduledAt || 0) - new Date(a.createdAt || a.scheduledAt || 0));
 }
 
 function currentPage() {
@@ -329,6 +349,7 @@ document.querySelector("#importContactsButton")?.addEventListener("click", async
   try {
     const contacts = parseCsv(document.querySelector("#contactsInput").value);
     const result = await apiFetch("/api/contacts/import", { method: "POST", body: JSON.stringify({ contacts }) });
+    setJson(localContactsKey, result.contacts || contacts);
     document.querySelector("#contactImportStatus").textContent = `${result.activeContacts} active contacts imported`;
     showToast("Contacts imported and segmented.");
   } catch (error) {
@@ -393,6 +414,7 @@ document.querySelector("#sendTestButton")?.addEventListener("click", async () =>
   if (!recipients.length) return showToast("Add at least one test recipient.");
   try {
     const result = await apiFetch("/api/test/send", { method: "POST", body: JSON.stringify({ campaign, recipients }) });
+    mergeEvents(result.events || []);
     showToast(`${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} test emails.`);
   } catch (error) {
     showToast(error.message);
@@ -402,7 +424,7 @@ document.querySelector("#sendTestButton")?.addEventListener("click", async () =>
 async function renderLaunchActivity() {
   const activityLog = document.querySelector("#activityLog");
   if (!activityLog) return;
-  const events = await apiFetch("/api/events").catch(() => []);
+  const events = mergedEvents(await apiFetch("/api/events").catch(() => []));
   activityLog.innerHTML = "";
   if (!events.length) {
     activityLog.innerHTML = '<p class="muted">No activity yet.</p>';
@@ -444,6 +466,7 @@ document.querySelector("#runAutomationButton")?.addEventListener("click", async 
       }),
     });
     showToast(`${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} opener emails.`);
+    mergeEvents(result.events || []);
     renderLaunchActivity();
   } catch (error) {
     showToast(error.message);
