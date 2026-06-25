@@ -196,6 +196,9 @@ function createTransport(runtimeConfig = config) {
     port: smtpConfig.smtpPort,
     secure: smtpConfig.smtpSecure === true,
     requireTLS: smtpConfig.smtpPort === 587,
+    connectionTimeout: 12000,
+    greetingTimeout: 12000,
+    socketTimeout: 12000,
     auth: smtpConfig.smtpUser
       ? {
           user: smtpConfig.smtpUser,
@@ -314,9 +317,12 @@ app.post("/api/mail/connect", async (request, response) => {
     await createTransport(nextConfig).verify();
   } catch (error) {
     const tlsVersionMismatch = /wrong version|tls_validate_record_header/i.test(error.message || "");
+    const timedOut = /timeout|timed out|etimedout|greeting never received/i.test(error.message || "");
     return response.status(400).json({
       message: tlsVersionMismatch
         ? "SMTP connection failed: port 587 must use STARTTLS, not SSL/TLS. SSL is now forced off for port 587; try again with smtp.office365.com and port 587."
+        : timedOut
+          ? "SMTP connection timed out. Check that SMTP AUTH is enabled for this Microsoft 365 mailbox, then try smtp.office365.com on port 587 with SSL/TLS off."
         : `SMTP connection failed: ${error.message}`,
     });
   }
