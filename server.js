@@ -179,16 +179,27 @@ function renderEmailHtml({ contact, email, campaign, token, runtimeConfig = conf
   `;
 }
 
+function normalizeSmtpConfig(rawConfig = {}) {
+  const smtpPort = Number(rawConfig.smtpPort || 587);
+  return {
+    ...rawConfig,
+    smtpPort,
+    smtpSecure: smtpPort === 465 ? true : smtpPort === 587 ? false : Boolean(rawConfig.smtpSecure),
+  };
+}
+
 function createTransport(runtimeConfig = config) {
-  if (!runtimeConfig.smtpHost) return null;
+  const smtpConfig = normalizeSmtpConfig(runtimeConfig);
+  if (!smtpConfig.smtpHost) return null;
   return nodemailer.createTransport({
-    host: runtimeConfig.smtpHost,
-    port: Number(runtimeConfig.smtpPort || 587),
-    secure: runtimeConfig.smtpSecure === true,
-    auth: runtimeConfig.smtpUser
+    host: smtpConfig.smtpHost,
+    port: smtpConfig.smtpPort,
+    secure: smtpConfig.smtpSecure === true,
+    requireTLS: smtpConfig.smtpPort === 587,
+    auth: smtpConfig.smtpUser
       ? {
-          user: runtimeConfig.smtpUser,
-          pass: runtimeConfig.smtpPass,
+          user: smtpConfig.smtpUser,
+          pass: smtpConfig.smtpPass,
         }
       : undefined,
   });
@@ -263,7 +274,7 @@ app.get("/api/status", async (_request, response) => {
 
 app.get("/api/mail/config", async (_request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(db.mailConfig || {}));
   response.json({
     smtpHost: runtimeConfig.smtpHost || "",
     smtpPort: runtimeConfig.smtpPort || 587,
@@ -287,7 +298,7 @@ app.post("/api/mail/connect", async (request, response) => {
     });
   }
 
-  const nextConfig = mergeConfig({
+  const nextConfig = normalizeSmtpConfig(mergeConfig({
     smtpHost: incoming.smtpHost || "",
     smtpPort: Number(incoming.smtpPort || 587),
     smtpSecure: Boolean(incoming.smtpSecure),
@@ -297,13 +308,16 @@ app.post("/api/mail/connect", async (request, response) => {
     fromEmail: incoming.fromEmail || incoming.smtpUser,
     replyTo: incoming.replyTo || incoming.smtpUser,
     address: incoming.address || "",
-  });
+  }));
 
   try {
     await createTransport(nextConfig).verify();
   } catch (error) {
+    const tlsVersionMismatch = /wrong version|tls_validate_record_header/i.test(error.message || "");
     return response.status(400).json({
-      message: `SMTP connection failed: ${error.message}`,
+      message: tlsVersionMismatch
+        ? "SMTP connection failed: port 587 must use STARTTLS, not SSL/TLS. SSL is now forced off for port 587; try again with smtp.office365.com and port 587."
+        : `SMTP connection failed: ${error.message}`,
     });
   }
 
