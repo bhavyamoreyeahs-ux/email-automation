@@ -113,6 +113,12 @@ function rememberSendMode(result = {}) {
   }
 }
 
+function savedMailboxPayload() {
+  const mailbox = getJson(mailboxKey, {});
+  if (!mailbox.connected || !mailbox.smtpHost || !mailbox.smtpUser || !mailbox.smtpPass) return null;
+  return mailbox;
+}
+
 function currentPage() {
   return window.location.pathname.split("/").pop() || "index.html";
 }
@@ -317,6 +323,11 @@ const mailboxForm = document.querySelector("#mailboxForm");
 if (mailboxForm) {
   const smtpPortInput = document.querySelector("#smtpPortInput");
   const smtpSecureInput = document.querySelector("#smtpSecureInput");
+  const savedMailbox = getJson(mailboxKey, {});
+  const mailConnectionStatus = document.querySelector("#mailConnectionStatus");
+  if (savedMailbox.connected && mailConnectionStatus) {
+    mailConnectionStatus.textContent = `Mailbox is saved in this browser as ${savedMailbox.smtpUser || savedMailbox.fromEmail}.`;
+  }
   const syncSecureWithPort = () => {
     const port = Number(smtpPortInput.value);
     if (port === 587) smtpSecureInput.checked = false;
@@ -324,16 +335,29 @@ if (mailboxForm) {
   };
 
   apiFetch("/api/mail/config").then((config) => {
-    document.querySelector("#smtpHostInput").value = config.smtpHost || "";
-    smtpPortInput.value = config.smtpPort || 587;
-    document.querySelector("#smtpUserInput").value = config.smtpUser || "";
-    document.querySelector("#fromNameInput").value = config.fromName || "";
-    document.querySelector("#fromEmailInput").value = config.fromEmail || "";
-    document.querySelector("#replyToInput").value = config.replyTo || "";
-    document.querySelector("#companyAddressInput").value = config.address || "";
-    smtpSecureInput.checked = Boolean(config.smtpSecure);
+    const mergedConfig = { ...savedMailbox, ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "" && value !== undefined && value !== null)) };
+    document.querySelector("#smtpHostInput").value = mergedConfig.smtpHost || "";
+    smtpPortInput.value = mergedConfig.smtpPort || 587;
+    document.querySelector("#smtpUserInput").value = mergedConfig.smtpUser || "";
+    document.querySelector("#smtpPasswordInput").value = savedMailbox.smtpPass || "";
+    document.querySelector("#fromNameInput").value = mergedConfig.fromName || "";
+    document.querySelector("#fromEmailInput").value = mergedConfig.fromEmail || "";
+    document.querySelector("#replyToInput").value = mergedConfig.replyTo || "";
+    document.querySelector("#companyAddressInput").value = mergedConfig.address || "";
+    smtpSecureInput.checked = Boolean(mergedConfig.smtpSecure);
     syncSecureWithPort();
-  }).catch(() => {});
+  }).catch(() => {
+    document.querySelector("#smtpHostInput").value = savedMailbox.smtpHost || "";
+    smtpPortInput.value = savedMailbox.smtpPort || 587;
+    document.querySelector("#smtpUserInput").value = savedMailbox.smtpUser || "";
+    document.querySelector("#smtpPasswordInput").value = savedMailbox.smtpPass || "";
+    document.querySelector("#fromNameInput").value = savedMailbox.fromName || "";
+    document.querySelector("#fromEmailInput").value = savedMailbox.fromEmail || "";
+    document.querySelector("#replyToInput").value = savedMailbox.replyTo || "";
+    document.querySelector("#companyAddressInput").value = savedMailbox.address || "";
+    smtpSecureInput.checked = Boolean(savedMailbox.smtpSecure);
+    syncSecureWithPort();
+  });
 
   smtpPortInput.addEventListener("input", syncSecureWithPort);
 
@@ -350,15 +374,14 @@ if (mailboxForm) {
         fromEmail: document.querySelector("#fromEmailInput").value.trim(),
         replyTo: document.querySelector("#replyToInput").value.trim(),
         address: document.querySelector("#companyAddressInput").value.trim(),
+        smtpPass: document.querySelector("#smtpPasswordInput").value,
       };
       await apiFetch("/api/mail/connect", {
         method: "POST",
-        body: JSON.stringify({
-          ...nextMailbox,
-          smtpPass: document.querySelector("#smtpPasswordInput").value,
-        }),
+        body: JSON.stringify(nextMailbox),
       });
       setJson(mailboxKey, { ...nextMailbox, connected: true, connectedAt: new Date().toISOString() });
+      if (mailConnectionStatus) mailConnectionStatus.textContent = `Mailbox is saved in this browser as ${nextMailbox.smtpUser}.`;
       showToast("Mailbox verified and saved.");
       window.setTimeout(() => (window.location.href = "audience.html"), 700);
     } catch (error) {
@@ -464,7 +487,7 @@ document.querySelector("#sendTestButton")?.addEventListener("click", async () =>
   if (!campaign) return showToast("Complete setup first.");
   if (!recipients.length) return showToast("Add at least one test recipient.");
   try {
-    const result = await apiFetch("/api/test/send", { method: "POST", body: JSON.stringify({ campaign, recipients }) });
+    const result = await apiFetch("/api/test/send", { method: "POST", body: JSON.stringify({ campaign, recipients, mailbox: savedMailboxPayload() }) });
     rememberSendMode(result);
     mergeEvents((result.events || []).length ? result.events : fallbackEventsFromResults(result, campaign, "test-"));
     showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} test emails.`);
@@ -506,7 +529,7 @@ async function renderLaunchActivity() {
   });
   document.querySelectorAll("[data-push]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await apiFetch(`/api/followups/${button.dataset.push}/push`, { method: "POST", body: JSON.stringify({}) });
+      await apiFetch(`/api/followups/${button.dataset.push}/push`, { method: "POST", body: JSON.stringify({ mailbox: savedMailboxPayload() }) });
       showToast("Follow-up pushed.");
       renderLaunchActivity();
     });
@@ -524,6 +547,7 @@ document.querySelector("#runAutomationButton")?.addEventListener("click", async 
       method: "POST",
       body: JSON.stringify({
         campaign,
+        mailbox: savedMailboxPayload(),
         segment: document.querySelector("#segmentSelect").value,
         limit,
       }),

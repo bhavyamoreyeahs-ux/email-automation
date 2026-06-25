@@ -404,7 +404,7 @@ app.post("/api/campaigns", async (request, response) => {
 
 app.post("/api/automation/run", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
   const campaign = request.body.campaign;
   const issues = complianceIssues(campaign, runtimeConfig);
   if (issues.length) return response.status(400).json({ issues });
@@ -510,7 +510,7 @@ app.post("/api/automation/run", async (request, response) => {
 
 app.post("/api/followups/:id/push", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
   const event = db.events.find((item) => item.id === request.params.id);
 
   if (!event) return response.status(404).json({ message: "Follow-up event not found." });
@@ -548,7 +548,7 @@ app.post("/api/followups/:id/push", async (request, response) => {
 
 app.post("/api/test/send", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
   const campaign = request.body.campaign;
   const recipients = Array.isArray(request.body.recipients)
     ? [...new Set(request.body.recipients.map(normalizeEmail).filter(Boolean))]
