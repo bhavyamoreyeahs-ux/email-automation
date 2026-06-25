@@ -158,14 +158,7 @@ function renderActivity(events) {
   });
 }
 
-async function loadDashboard() {
-  try {
-    const data = await apiFetch("/api/dashboard").catch(() => ({
-      totals: { contacts: 0, sent: 0, simulated: 0, reverts: 0, converted: 0 },
-      continents: [],
-      recentEvents: [],
-    }));
-    const apiContacts = await apiFetch("/api/contacts").catch(() => []);
+function renderDashboardSnapshot(data, apiContacts = []) {
     const localEvents = getJson(localEventsKey);
     const localContacts = getJson(localContactsKey);
     const localInbox = getJson(localInboxKey);
@@ -219,10 +212,36 @@ async function loadDashboard() {
     );
     renderContinents(continents);
     renderActivity(events.slice(0, 12));
+}
+
+function localDashboardData() {
+  return {
+    totals: { contacts: 0, sent: 0, simulated: 0, reverts: 0, converted: 0 },
+    continents: [],
+    recentEvents: [],
+  };
+}
+
+async function loadDashboard({ quiet = false } = {}) {
+  renderDashboardSnapshot(localDashboardData());
+
+  try {
+    const [data, apiContacts] = await Promise.all([
+      apiFetch("/api/dashboard").catch(() => localDashboardData()),
+      apiFetch("/api/contacts").catch(() => []),
+    ]);
+    renderDashboardSnapshot(data, apiContacts);
   } catch (error) {
-    showToast(error.message);
+    if (!quiet) showToast(error.message);
   }
 }
 
-refreshDashboardButton.addEventListener("click", loadDashboard);
+refreshDashboardButton.addEventListener("click", () => loadDashboard());
+window.addEventListener("storage", (event) => {
+  if ([localEventsKey, localContactsKey, localInboxKey].includes(event.key)) {
+    renderDashboardSnapshot(localDashboardData());
+  }
+});
+
 loadDashboard();
+window.setInterval(() => loadDashboard({ quiet: true }), 5000);
