@@ -16,7 +16,7 @@
             <label>From email<input id="fromEmailInput" type="email" placeholder="sender@company.com" /></label>
             <label>Reply-to<input id="replyToInput" type="email" placeholder="reply@company.com" /></label>
             <label>Company address<input id="companyAddressInput" type="text" placeholder="Postal address for footer compliance" /></label>
-            <label class="checkbox-inline full-span"><input id="smtpSecureInput" type="checkbox" /> Use TLS/SSL, usually for port 465</label>
+            <label class="checkbox-inline full-span"><input id="smtpSecureInput" type="checkbox" /> Use SSL/TLS only for port 465. Leave this off for Office 365 or Gmail on port 587.</label>
             <button class="primary-button full-span" type="submit">Verify and save mailbox</button>
           </form>
           <p class="muted small" id="mailConnectionStatus">Mailbox is not connected yet.</p>

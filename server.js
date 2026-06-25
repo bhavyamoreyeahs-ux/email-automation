@@ -9,7 +9,7 @@ import nodemailer from "nodemailer";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = Number(process.env.PORT || 5174);
-const dataDir = path.join(__dirname, "data");
+const dataDir = process.env.VERCEL ? path.join("/tmp", "email-automation-data") : path.join(__dirname, "data");
 const dbPath = path.join(dataDir, "automation-db.json");
 
 const defaultConfig = {
@@ -644,7 +644,11 @@ app.get("/unsubscribe/:token", async (request, response) => {
   response.send("<h1>You have been unsubscribed</h1><p>Your marketing opt-out has been recorded.</p>");
 });
 
-app.listen(port, "127.0.0.1", () => {
-  console.log(`MoreYeahs email automation running at http://127.0.0.1:${port}`);
-  console.log(`Provider mode: ${process.env.SMTP_HOST ? "SMTP sending" : "safe simulation"}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(port, "127.0.0.1", () => {
+    console.log(`MoreYeahs email automation running at http://127.0.0.1:${port}`);
+    console.log(`Provider mode: ${process.env.SMTP_HOST ? "SMTP sending" : "safe simulation"}`);
+  });
+}
+
+export default app;

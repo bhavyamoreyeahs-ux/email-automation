@@ -18,8 +18,18 @@ async function apiFetch(path, options) {
     ...options,
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ message: "Request failed." }));
-    throw new Error((body.issues || [body.message || "Request failed."]).join(" "));
+    const text = await response.text();
+    let body = {};
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { message: text || `Request failed (${response.status}).` };
+    }
+    const apiMissing = path.startsWith("/api/") && response.status === 404;
+    const fallback = apiMissing
+      ? "Backend API is not available on this deployment yet. Redeploy the latest version and try again."
+      : `Request failed (${response.status}).`;
+    throw new Error((body.issues || [apiMissing ? fallback : body.message || fallback]).join(" "));
   }
   return response.json();
 }
@@ -236,28 +246,40 @@ if (setupForm) {
 
 const mailboxForm = document.querySelector("#mailboxForm");
 if (mailboxForm) {
+  const smtpPortInput = document.querySelector("#smtpPortInput");
+  const smtpSecureInput = document.querySelector("#smtpSecureInput");
+  const syncSecureWithPort = () => {
+    const port = Number(smtpPortInput.value);
+    if (port === 587) smtpSecureInput.checked = false;
+    if (port === 465) smtpSecureInput.checked = true;
+  };
+
   apiFetch("/api/mail/config").then((config) => {
     document.querySelector("#smtpHostInput").value = config.smtpHost || "";
-    document.querySelector("#smtpPortInput").value = config.smtpPort || 587;
+    smtpPortInput.value = config.smtpPort || 587;
     document.querySelector("#smtpUserInput").value = config.smtpUser || "";
     document.querySelector("#fromNameInput").value = config.fromName || "";
     document.querySelector("#fromEmailInput").value = config.fromEmail || "";
     document.querySelector("#replyToInput").value = config.replyTo || "";
     document.querySelector("#companyAddressInput").value = config.address || "";
-    document.querySelector("#smtpSecureInput").checked = Boolean(config.smtpSecure);
+    smtpSecureInput.checked = Boolean(config.smtpSecure);
+    syncSecureWithPort();
   }).catch(() => {});
+
+  smtpPortInput.addEventListener("input", syncSecureWithPort);
 
   mailboxForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
+      syncSecureWithPort();
       await apiFetch("/api/mail/connect", {
         method: "POST",
         body: JSON.stringify({
           smtpHost: document.querySelector("#smtpHostInput").value.trim(),
-          smtpPort: document.querySelector("#smtpPortInput").value,
+          smtpPort: smtpPortInput.value,
           smtpUser: document.querySelector("#smtpUserInput").value.trim(),
           smtpPass: document.querySelector("#smtpPasswordInput").value,
-          smtpSecure: document.querySelector("#smtpSecureInput").checked,
+          smtpSecure: smtpSecureInput.checked,
           fromName: document.querySelector("#fromNameInput").value.trim(),
           fromEmail: document.querySelector("#fromEmailInput").value.trim(),
           replyTo: document.querySelector("#replyToInput").value.trim(),
