@@ -68,6 +68,18 @@ function mergedEvents(apiEvents = []) {
   return [...byId.values()].sort((a, b) => new Date(b.createdAt || b.scheduledAt || 0) - new Date(a.createdAt || a.scheduledAt || 0));
 }
 
+function fallbackEventsFromResults(result, campaign, typePrefix = "") {
+  const eventType = `${typePrefix}${result.mode === "smtp" ? "sent" : "simulation"}`;
+  return (result.results || []).map((delivery, index) => ({
+    id: `local_${eventType}_${Date.now()}_${index}_${String(delivery.to || "").replace(/[^a-z0-9]/gi, "_")}`,
+    type: eventType,
+    contactEmail: delivery.to,
+    campaignName: campaign?.offer || "Campaign",
+    subject: delivery.subject || campaign?.emails?.[0]?.subject || "Campaign activity",
+    createdAt: new Date().toISOString(),
+  }));
+}
+
 function currentPage() {
   return window.location.pathname.split("/").pop() || "index.html";
 }
@@ -414,8 +426,8 @@ document.querySelector("#sendTestButton")?.addEventListener("click", async () =>
   if (!recipients.length) return showToast("Add at least one test recipient.");
   try {
     const result = await apiFetch("/api/test/send", { method: "POST", body: JSON.stringify({ campaign, recipients }) });
-    mergeEvents(result.events || []);
-    showToast(`${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} test emails.`);
+    mergeEvents((result.events || []).length ? result.events : fallbackEventsFromResults(result, campaign, "test-"));
+    showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} test emails.`);
   } catch (error) {
     showToast(error.message);
   }
@@ -465,8 +477,8 @@ document.querySelector("#runAutomationButton")?.addEventListener("click", async 
         limit: Number(document.querySelector("#sendLimitInput").value || 25),
       }),
     });
-    showToast(`${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} opener emails.`);
-    mergeEvents(result.events || []);
+    mergeEvents((result.events || []).length ? result.events : fallbackEventsFromResults(result, campaign));
+    showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} opener emails.`);
     renderLaunchActivity();
   } catch (error) {
     showToast(error.message);

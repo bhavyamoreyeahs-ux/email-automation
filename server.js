@@ -417,32 +417,54 @@ app.post("/api/automation/run", async (request, response) => {
 
   const results = [];
   const createdEvents = [];
+  const failures = [];
   for (const contact of selectedContacts) {
     const token = crypto.createHash("sha256").update(`${contact.email}:${campaign.id || campaign.offer}`).digest("hex");
-    const result = await sendOrSimulate({
-      contact,
-      email: campaign.emails[0],
-      campaign,
-      token,
-      runtimeConfig,
-    });
-    results.push(result);
-    const openerEvent = {
-      id: makeId("event"),
-      type: result.mode,
-      contactEmail: contact.email,
-      campaignName: campaign.offer,
-      subject: result.subject,
-      createdAt: new Date().toISOString(),
-    };
-    db.events.unshift(openerEvent);
-    createdEvents.push(openerEvent);
+    try {
+      const result = await sendOrSimulate({
+        contact,
+        email: campaign.emails[0],
+        campaign,
+        token,
+        runtimeConfig,
+      });
+      results.push(result);
+      const openerEvent = {
+        id: makeId("event"),
+        type: result.mode,
+        contactEmail: contact.email,
+        campaignName: campaign.offer,
+        subject: result.subject,
+        createdAt: new Date().toISOString(),
+      };
+      db.events.unshift(openerEvent);
+      createdEvents.push(openerEvent);
 
-    campaign.emails.slice(1).forEach((email) => {
-      if (email.followupMode !== "delay") {
-        const manualEvent = {
+      campaign.emails.slice(1).forEach((email) => {
+        if (email.followupMode !== "delay") {
+          const manualEvent = {
+            id: makeId("event"),
+            type: "followup-manual",
+            contactEmail: contact.email,
+            campaignName: campaign.offer,
+            subject: email.subject
+              .replaceAll("{{company}}", contact.company || "your team")
+              .replaceAll("{{industry}}", contact.industry || "your industry"),
+            followupEmail: email,
+            contactSnapshot: contact,
+            campaignSnapshot: campaign,
+            createdAt: new Date().toISOString(),
+          };
+          db.events.unshift(manualEvent);
+          createdEvents.push(manualEvent);
+          return;
+        }
+
+        const delayDays = Math.min(60, Math.max(1, Number(email.followupDelayDays || 1)));
+        const scheduledAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
+        const scheduledEvent = {
           id: makeId("event"),
-          type: "followup-manual",
+          type: "followup-scheduled",
           contactEmail: contact.email,
           campaignName: campaign.offer,
           subject: email.subject
@@ -451,36 +473,31 @@ app.post("/api/automation/run", async (request, response) => {
           followupEmail: email,
           contactSnapshot: contact,
           campaignSnapshot: campaign,
+          scheduledAt,
+          delayDays,
           createdAt: new Date().toISOString(),
         };
-        db.events.unshift(manualEvent);
-        createdEvents.push(manualEvent);
-        return;
-      }
-
-      const delayDays = Math.min(60, Math.max(1, Number(email.followupDelayDays || 1)));
-      const scheduledAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
-      const scheduledEvent = {
-        id: makeId("event"),
-        type: "followup-scheduled",
-        contactEmail: contact.email,
-        campaignName: campaign.offer,
-        subject: email.subject
-          .replaceAll("{{company}}", contact.company || "your team")
-          .replaceAll("{{industry}}", contact.industry || "your industry"),
-        followupEmail: email,
-        contactSnapshot: contact,
-        campaignSnapshot: campaign,
-        scheduledAt,
-        delayDays,
-        createdAt: new Date().toISOString(),
-      };
-      db.events.unshift(scheduledEvent);
-      createdEvents.push(scheduledEvent);
-    });
+        db.events.unshift(scheduledEvent);
+        createdEvents.push(scheduledEvent);
+      });
+    } catch (error) {
+      failures.push({ email: contact.email, message: formatSmtpError(error) });
+    }
   }
 
   await writeDb(db);
+  if (failures.length) {
+    const status = results.length ? 200 : 400;
+    return response.status(status).json({
+      message: `${failures.length} opener email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
+      partialFailure: results.length > 0,
+      mode: runtimeConfig.smtpHost ? "smtp" : "simulation",
+      processed: results.length,
+      results,
+      events: createdEvents,
+      failures,
+    });
+  }
   response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents });
 });
 
@@ -595,9 +612,14 @@ app.post("/api/test/send", async (request, response) => {
 
   await writeDb(db);
   if (failures.length) {
-    return response.status(400).json({
+    const status = results.length ? 200 : 400;
+    return response.status(status).json({
       message: `${failures.length} test email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
+      partialFailure: results.length > 0,
+      mode: runtimeConfig.smtpHost ? "smtp" : "simulation",
       processed: results.length,
+      results,
+      events: createdEvents,
       failures,
     });
   }

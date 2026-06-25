@@ -164,16 +164,18 @@ async function loadDashboard() {
       continents: [],
       recentEvents: [],
     }));
+    const apiContacts = await apiFetch("/api/contacts").catch(() => []);
     const localEvents = getJson(localEventsKey);
     const localContacts = getJson(localContactsKey);
+    const contacts = mergeById(apiContacts, localContacts);
     const events = mergeById(data.recentEvents || [], localEvents);
-    const contactMap = new Map(localContacts.map((contact) => [String(contact.email || "").toLowerCase(), contact]));
+    const contactMap = new Map(contacts.map((contact) => [String(contact.email || "").toLowerCase(), contact]));
     const totals = {
-      contacts: Math.max(Number(data.totals.contacts || 0), localContacts.length),
+      contacts: Math.max(Number(data.totals.contacts || 0), contacts.length),
       sent: events.filter((event) => sentTypes.has(event.type)).length,
       simulated: events.filter((event) => simulatedTypes.has(event.type)).length,
       reverts: Number(data.totals.reverts || 0),
-      converted: Math.max(Number(data.totals.converted || 0), localContacts.filter(isForwarded).length),
+      converted: Math.max(Number(data.totals.converted || 0), contacts.filter(isForwarded).length),
     };
     const continentMap = new Map();
     events.forEach((event) => {
@@ -184,7 +186,7 @@ async function loadDashboard() {
       if (simulatedTypes.has(event.type)) current.simulated += 1;
       continentMap.set(continent, current);
     });
-    localContacts.forEach((contact) => {
+    contacts.forEach((contact) => {
       const continent = inferContinent(contact);
       const current = continentMap.get(continent) || { continent, sent: 0, simulated: 0, reverts: 0, converted: 0 };
       if (isForwarded(contact)) current.converted += 1;
