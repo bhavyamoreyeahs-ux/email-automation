@@ -299,6 +299,9 @@ function formatInboxError(error) {
   if (/timeout|timed out|etimedout/i.test(message)) {
     return "Inbox sync timed out. Check that IMAP is enabled for this mailbox and try again.";
   }
+  if (/command failed/i.test(message)) {
+    return "Inbox sync was rejected by the mail server. For Microsoft 365, SMTP sending can work while IMAP reply fetching is still disabled. Enable IMAP for this mailbox, or connect Microsoft Graph OAuth for production reply sync.";
+  }
   return `Inbox sync failed: ${message}`;
 }
 
