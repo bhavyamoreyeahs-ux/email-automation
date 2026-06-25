@@ -4,6 +4,7 @@ const setupKey = "emailAutomationSetup";
 const sessionKey = "emailAutomationSession";
 const localEventsKey = "emailAutomationEvents";
 const localContactsKey = "emailAutomationContacts";
+const mailboxKey = "emailAutomationMailbox";
 const orderedPages = ["setup.html", "mailbox.html", "audience.html", "campaign.html", "launch.html"];
 
 function showToast(message) {
@@ -80,6 +81,38 @@ function fallbackEventsFromResults(result, campaign, typePrefix = "") {
   }));
 }
 
+async function getContacts() {
+  const apiContacts = await apiFetch("/api/contacts").catch(() => []);
+  const localContacts = getJson(localContactsKey, []);
+  const byEmail = new Map();
+  [...apiContacts, ...localContacts].forEach((contact) => {
+    const email = String(contact.email || "").toLowerCase();
+    if (email) byEmail.set(email, contact);
+  });
+  return [...byEmail.values()];
+}
+
+function fallbackEventsFromContacts(contacts, campaign, mode = "smtp") {
+  const subject = campaign?.emails?.[0]?.subject || "Campaign activity";
+  return contacts.map((contact, index) => ({
+    id: `local_${mode === "smtp" ? "sent" : "simulation"}_${Date.now()}_${index}_${String(contact.email || "").replace(/[^a-z0-9]/gi, "_")}`,
+    type: mode === "smtp" ? "sent" : "simulation",
+    contactEmail: contact.email,
+    campaignName: campaign?.offer || "Campaign",
+    subject: subject
+      .replaceAll("{{company}}", contact.company || "your team")
+      .replaceAll("{{industry}}", contact.industry || "your industry"),
+    createdAt: new Date().toISOString(),
+  }));
+}
+
+function rememberSendMode(result = {}) {
+  if (result.mode === "smtp" && Number(result.processed || 0) > 0) {
+    const mailbox = getJson(mailboxKey, {});
+    setJson(mailboxKey, { ...mailbox, connected: true, connectedAt: mailbox.connectedAt || new Date().toISOString() });
+  }
+}
+
 function currentPage() {
   return window.location.pathname.split("/").pop() || "index.html";
 }
@@ -91,11 +124,13 @@ async function getProgress() {
   }));
   const setup = getJson(setupKey, {});
   const campaign = getJson(campaignKey);
+  const mailbox = getJson(mailboxKey, {});
+  const localContacts = getJson(localContactsKey, []);
   return {
     loggedIn: Boolean(getJson(sessionKey)),
     setup: Boolean(setup.offer && setup.audience && setup.proof),
-    mailbox: Boolean(status.mailConfigured),
-    audience: Number(status.contactCount || 0) > 0,
+    mailbox: Boolean(status.mailConfigured || mailbox.connected),
+    audience: Number(status.contactCount || 0) > 0 || localContacts.length > 0,
     campaign: Boolean(campaign?.emails?.length),
   };
 }
@@ -306,20 +341,24 @@ if (mailboxForm) {
     event.preventDefault();
     try {
       syncSecureWithPort();
+      const nextMailbox = {
+        smtpHost: document.querySelector("#smtpHostInput").value.trim(),
+        smtpPort: smtpPortInput.value,
+        smtpUser: document.querySelector("#smtpUserInput").value.trim(),
+        smtpSecure: smtpSecureInput.checked,
+        fromName: document.querySelector("#fromNameInput").value.trim(),
+        fromEmail: document.querySelector("#fromEmailInput").value.trim(),
+        replyTo: document.querySelector("#replyToInput").value.trim(),
+        address: document.querySelector("#companyAddressInput").value.trim(),
+      };
       await apiFetch("/api/mail/connect", {
         method: "POST",
         body: JSON.stringify({
-          smtpHost: document.querySelector("#smtpHostInput").value.trim(),
-          smtpPort: smtpPortInput.value,
-          smtpUser: document.querySelector("#smtpUserInput").value.trim(),
+          ...nextMailbox,
           smtpPass: document.querySelector("#smtpPasswordInput").value,
-          smtpSecure: smtpSecureInput.checked,
-          fromName: document.querySelector("#fromNameInput").value.trim(),
-          fromEmail: document.querySelector("#fromEmailInput").value.trim(),
-          replyTo: document.querySelector("#replyToInput").value.trim(),
-          address: document.querySelector("#companyAddressInput").value.trim(),
         }),
       });
+      setJson(mailboxKey, { ...nextMailbox, connected: true, connectedAt: new Date().toISOString() });
       showToast("Mailbox verified and saved.");
       window.setTimeout(() => (window.location.href = "audience.html"), 700);
     } catch (error) {
@@ -426,6 +465,7 @@ document.querySelector("#sendTestButton")?.addEventListener("click", async () =>
   if (!recipients.length) return showToast("Add at least one test recipient.");
   try {
     const result = await apiFetch("/api/test/send", { method: "POST", body: JSON.stringify({ campaign, recipients }) });
+    rememberSendMode(result);
     mergeEvents((result.events || []).length ? result.events : fallbackEventsFromResults(result, campaign, "test-"));
     showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} test emails.`);
   } catch (error) {
@@ -436,6 +476,14 @@ document.querySelector("#sendTestButton")?.addEventListener("click", async () =>
 async function renderLaunchActivity() {
   const activityLog = document.querySelector("#activityLog");
   if (!activityLog) return;
+  const providerMode = document.querySelector("#providerMode");
+  if (providerMode) {
+    const status = await apiFetch("/api/status").catch(() => ({}));
+    const mailbox = getJson(mailboxKey, {});
+    const connected = Boolean(status.mailConfigured || mailbox.connected);
+    providerMode.textContent = connected ? "SMTP mode" : "Simulation mode";
+    providerMode.classList.toggle("success", connected);
+  }
   const events = mergedEvents(await apiFetch("/api/events").catch(() => []));
   activityLog.innerHTML = "";
   if (!events.length) {
@@ -469,15 +517,23 @@ document.querySelector("#runAutomationButton")?.addEventListener("click", async 
   const campaign = getJson(campaignKey);
   if (!campaign?.emails?.length) return showToast("Complete campaign setup first.");
   try {
+    const contacts = await getContacts();
+    const limit = Number(document.querySelector("#sendLimitInput").value || 25);
+    const selectedContacts = contacts.slice(0, limit);
     const result = await apiFetch("/api/automation/run", {
       method: "POST",
       body: JSON.stringify({
         campaign,
         segment: document.querySelector("#segmentSelect").value,
-        limit: Number(document.querySelector("#sendLimitInput").value || 25),
+        limit,
       }),
     });
-    mergeEvents((result.events || []).length ? result.events : fallbackEventsFromResults(result, campaign));
+    rememberSendMode(result);
+    const resultFallbackEvents = fallbackEventsFromResults(result, campaign);
+    const fallbackEvents = resultFallbackEvents.length
+      ? resultFallbackEvents
+      : fallbackEventsFromContacts(selectedContacts.slice(0, Number(result.processed || 0)), campaign, result.mode);
+    mergeEvents((result.events || []).length ? result.events : fallbackEvents);
     showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} opener emails.`);
     renderLaunchActivity();
   } catch (error) {

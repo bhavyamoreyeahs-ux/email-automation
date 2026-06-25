@@ -485,7 +485,13 @@ app.post("/api/automation/run", async (request, response) => {
     }
   }
 
-  await writeDb(db);
+  let persisted = true;
+  try {
+    await writeDb(db);
+  } catch (error) {
+    persisted = false;
+    console.error("Activity persistence failed after automation send", error);
+  }
   if (failures.length) {
     const status = results.length ? 200 : 400;
     return response.status(status).json({
@@ -495,10 +501,11 @@ app.post("/api/automation/run", async (request, response) => {
       processed: results.length,
       results,
       events: createdEvents,
+      persisted,
       failures,
     });
   }
-  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents });
+  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents, persisted });
 });
 
 app.post("/api/followups/:id/push", async (request, response) => {
@@ -610,7 +617,13 @@ app.post("/api/test/send", async (request, response) => {
     .filter(Boolean)
     .forEach((event) => db.events.unshift(event));
 
-  await writeDb(db);
+  let persisted = true;
+  try {
+    await writeDb(db);
+  } catch (error) {
+    persisted = false;
+    console.error("Activity persistence failed after test send", error);
+  }
   if (failures.length) {
     const status = results.length ? 200 : 400;
     return response.status(status).json({
@@ -620,10 +633,11 @@ app.post("/api/test/send", async (request, response) => {
       processed: results.length,
       results,
       events: createdEvents,
+      persisted,
       failures,
     });
   }
-  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents });
+  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents, persisted });
 });
 
 app.get("/api/events", async (_request, response) => {
