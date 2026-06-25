@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import { ImapFlow } from "imapflow";
+import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -188,6 +190,23 @@ function normalizeSmtpConfig(rawConfig = {}) {
   };
 }
 
+function normalizeImapConfig(rawConfig = {}) {
+  const smtpHost = String(rawConfig.smtpHost || "").toLowerCase();
+  const smtpUser = rawConfig.smtpUser || rawConfig.fromEmail || "";
+  let imapHost = rawConfig.imapHost || "";
+
+  if (!imapHost && /office365|outlook/.test(smtpHost)) imapHost = "outlook.office365.com";
+  if (!imapHost && /gmail/.test(smtpHost)) imapHost = "imap.gmail.com";
+
+  return {
+    imapHost,
+    imapPort: Number(rawConfig.imapPort || 993),
+    imapSecure: rawConfig.imapSecure ?? true,
+    imapUser: rawConfig.imapUser || smtpUser,
+    imapPass: rawConfig.imapPass || rawConfig.smtpPass || "",
+  };
+}
+
 function createTransport(runtimeConfig = config) {
   const smtpConfig = normalizeSmtpConfig(runtimeConfig);
   if (!smtpConfig.smtpHost) return null;
@@ -269,6 +288,76 @@ async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
   });
 
   return { mode: "sent", to, subject, messageId: response.messageId };
+}
+
+function formatInboxError(error) {
+  const message = error?.message || "Unknown inbox sync error.";
+  if (/auth|authentication|login|invalid credentials|AUTHENTICATE/i.test(message)) {
+    return `Inbox authentication failed. Check that IMAP is enabled for this mailbox and that the saved app password is valid. Details: ${message}`;
+  }
+  if (/timeout|timed out|etimedout/i.test(message)) {
+    return "Inbox sync timed out. Check that IMAP is enabled for this mailbox and try again.";
+  }
+  return `Inbox sync failed: ${message}`;
+}
+
+async function fetchInboxMessages(runtimeConfig = config) {
+  const imapConfig = normalizeImapConfig(runtimeConfig);
+  if (!imapConfig.imapHost || !imapConfig.imapUser || !imapConfig.imapPass) {
+    throw new Error("Inbox sync needs a saved mailbox with IMAP access. Reconnect the mailbox once, then sync again.");
+  }
+
+  const client = new ImapFlow({
+    host: imapConfig.imapHost,
+    port: imapConfig.imapPort,
+    secure: imapConfig.imapSecure !== false,
+    auth: {
+      user: imapConfig.imapUser,
+      pass: imapConfig.imapPass,
+    },
+    logger: false,
+    connectionTimeout: 12000,
+    greetingTimeout: 12000,
+    socketTimeout: 12000,
+  });
+
+  await client.connect();
+  const messages = [];
+  const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
+  const selfEmail = normalizeEmail(runtimeConfig.fromEmail || runtimeConfig.smtpUser || imapConfig.imapUser);
+  const lock = await client.getMailboxLock("INBOX");
+
+  try {
+    const ids = await client.search({ since });
+    if (!ids.length) return [];
+    const recentIds = ids.slice(-50);
+    for await (const item of client.fetch(recentIds, { uid: true, envelope: true, source: true, internalDate: true })) {
+      const parsed = await simpleParser(item.source);
+      const from = parsed.from?.value?.[0] || {};
+      const email = normalizeEmail(from.address);
+      if (!email || email === selfEmail) continue;
+
+      const body = (parsed.text || parsed.html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+      const receivedAt = (parsed.date || item.internalDate || new Date()).toISOString();
+      messages.push({
+        id: crypto.createHash("sha256").update(String(parsed.messageId || `${item.uid}:${email}:${receivedAt}`)).digest("hex"),
+        uid: item.uid,
+        messageId: parsed.messageId || "",
+        name: from.name || "",
+        email,
+        subject: parsed.subject || item.envelope?.subject || "(No subject)",
+        preview: body.slice(0, 180),
+        body: body || "(No readable message body)",
+        receivedAt,
+        source: "imap",
+      });
+    }
+  } finally {
+    lock.release();
+    await client.logout().catch(() => {});
+  }
+
+  return messages.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
 }
 
 app.get("/api/status", async (_request, response) => {
@@ -691,12 +780,28 @@ app.get("/api/inbox", async (_request, response) => {
   response.json(db.inboxMessages.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)));
 });
 
+app.post("/api/inbox/sync", async (request, response) => {
+  const db = await readDb();
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+
+  try {
+    const incoming = await fetchInboxMessages(runtimeConfig);
+    const byId = new Map((db.inboxMessages || []).map((message) => [message.id, message]));
+    incoming.forEach((message) => byId.set(message.id, { ...byId.get(message.id), ...message }));
+    db.inboxMessages = [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 200);
+    await writeDb(db);
+    response.json({ synced: incoming.length, messages: db.inboxMessages });
+  } catch (error) {
+    response.status(400).json({ message: formatInboxError(error) });
+  }
+});
+
 app.post("/api/inbox/:id/reply", async (request, response) => {
   const db = await readDb();
-  const message = db.inboxMessages?.find((item) => item.id === request.params.id);
+  const message = db.inboxMessages?.find((item) => item.id === request.params.id) || request.body.message;
   if (!message) return response.status(404).json({ message: "Inbox message not found." });
 
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
   const body = String(request.body?.body || "").trim();
   const mode = request.body?.mode === "manual" ? "manual" : "auto";
   const draft = body;
@@ -719,6 +824,9 @@ app.post("/api/inbox/:id/reply", async (request, response) => {
     status: outbound.mode,
   });
   message.lastReplyAt = new Date().toISOString();
+  if (!db.inboxMessages?.some((item) => item.id === message.id)) {
+    db.inboxMessages = [message, ...(db.inboxMessages || [])].slice(0, 200);
+  }
   await writeDb(db);
   response.json({ reply: message.replies[0], delivery: outbound });
 });

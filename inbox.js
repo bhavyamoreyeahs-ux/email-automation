@@ -2,6 +2,9 @@ const inboxList = document.querySelector('#inboxList');
 const replyPanel = document.querySelector('#replyPanel');
 const inboxCount = document.querySelector('#inboxCount');
 const toast = document.querySelector('#toast');
+const syncInboxButton = document.querySelector('#syncInboxButton');
+const mailboxKey = 'emailAutomationMailbox';
+const localInboxKey = 'emailAutomationInbox';
 let selectedMessage = null;
 let messages = [];
 
@@ -10,6 +13,46 @@ function showToast(message) {
   toast.classList.add('show');
   window.clearTimeout(showToast.timeout);
   showToast.timeout = window.setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
+async function apiFetch(path, options) {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || 'Request failed.');
+  return data;
+}
+
+function getJson(key, fallback = null) {
+  try {
+    return JSON.parse(localStorage.getItem(key)) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function setJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function savedMailboxPayload() {
+  const mailbox = getJson(mailboxKey, {});
+  if (!mailbox.connected || !mailbox.smtpHost || !mailbox.smtpUser || !mailbox.smtpPass) return null;
+  return mailbox;
+}
+
+function mergeMessages(primary = [], secondary = []) {
+  const byId = new Map();
+  [...primary, ...secondary].filter((message) => message?.id).forEach((message) => byId.set(message.id, message));
+  return [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+}
+
+function saveInbox(nextMessages) {
+  const merged = mergeMessages(nextMessages, getJson(localInboxKey, []));
+  messages = merged.slice(0, 200);
+  setJson(localInboxKey, messages);
 }
 
 function renderInbox() {
@@ -119,9 +162,8 @@ function selectMessage(message) {
 }
 
 async function loadInbox() {
-  const response = await fetch('/api/inbox');
-  const data = await response.json();
-  messages = data;
+  const data = await apiFetch('/api/inbox').catch(() => []);
+  saveInbox(data);
   renderInbox();
   if (selectedMessage) {
     const fresh = messages.find((item) => item.id === selectedMessage.id);
@@ -131,6 +173,31 @@ async function loadInbox() {
     }
   } else if (messages[0]) {
     selectMessage(messages[0]);
+  }
+}
+
+async function syncInbox() {
+  const mailbox = savedMailboxPayload();
+  if (!mailbox) {
+    showToast('Reconnect SMTP once so Inbox can use the saved mailbox credentials.');
+    return;
+  }
+
+  syncInboxButton.disabled = true;
+  syncInboxButton.textContent = 'Syncing...';
+  try {
+    const result = await apiFetch('/api/inbox/sync', {
+      method: 'POST',
+      body: JSON.stringify({ mailbox }),
+    });
+    saveInbox(result.messages || []);
+    renderInbox();
+    showToast(`Synced ${result.synced} inbox messages.`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    syncInboxButton.disabled = false;
+    syncInboxButton.textContent = 'Sync replies';
   }
 }
 
@@ -147,7 +214,7 @@ async function sendReply(message, mode) {
   const response = await fetch(`/api/inbox/${message.id}/reply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body, mode }),
+    body: JSON.stringify({ body, mode, mailbox: savedMailboxPayload(), message }),
   });
 
   const result = await response.json();
@@ -160,4 +227,5 @@ async function sendReply(message, mode) {
   await loadInbox();
 }
 
+syncInboxButton?.addEventListener('click', syncInbox);
 loadInbox();

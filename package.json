@@ -16,6 +16,8 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "imapflow": "^1.2.0",
+    "mailparser": "^3.7.4",
     "nodemailer": "^9.0.1"
   }
 }

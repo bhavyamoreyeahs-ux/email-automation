@@ -13,6 +13,7 @@ const refreshDashboardButton = document.querySelector("#refreshDashboardButton")
 const toast = document.querySelector("#toast");
 const localEventsKey = "emailAutomationEvents";
 const localContactsKey = "emailAutomationContacts";
+const localInboxKey = "emailAutomationInbox";
 
 const colors = ["#1f6feb", "#0891b2", "#15803d", "#b45309", "#7c3aed", "#dc2626", "#64748b"];
 const sentTypes = new Set(["sent", "test-sent", "followup-sent"]);
@@ -167,14 +168,16 @@ async function loadDashboard() {
     const apiContacts = await apiFetch("/api/contacts").catch(() => []);
     const localEvents = getJson(localEventsKey);
     const localContacts = getJson(localContactsKey);
+    const localInbox = getJson(localInboxKey);
     const contacts = mergeById(apiContacts, localContacts);
     const events = mergeById(data.recentEvents || [], localEvents);
+    const revertedEmails = new Set(localInbox.map((message) => String(message.email || "").toLowerCase()).filter(Boolean));
     const contactMap = new Map(contacts.map((contact) => [String(contact.email || "").toLowerCase(), contact]));
     const totals = {
       contacts: Math.max(Number(data.totals.contacts || 0), contacts.length),
       sent: events.filter((event) => sentTypes.has(event.type)).length,
       simulated: events.filter((event) => simulatedTypes.has(event.type)).length,
-      reverts: Number(data.totals.reverts || 0),
+      reverts: Math.max(Number(data.totals.reverts || 0), revertedEmails.size),
       converted: Math.max(Number(data.totals.converted || 0), contacts.filter(isForwarded).length),
     };
     const continentMap = new Map();
@@ -189,6 +192,7 @@ async function loadDashboard() {
     contacts.forEach((contact) => {
       const continent = inferContinent(contact);
       const current = continentMap.get(continent) || { continent, sent: 0, simulated: 0, reverts: 0, converted: 0 };
+      if (revertedEmails.has(String(contact.email || "").toLowerCase())) current.reverts += 1;
       if (isForwarded(contact)) current.converted += 1;
       continentMap.set(continent, current);
     });
