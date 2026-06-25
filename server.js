@@ -291,7 +291,8 @@ async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
 }
 
 function formatInboxError(error) {
-  const message = error?.message || "Unknown inbox sync error.";
+  const details = [error?.message, error?.responseText, error?.code].filter(Boolean).join(" - ");
+  const message = details || "Unknown inbox sync error.";
   if (/auth|authentication|login|invalid credentials|AUTHENTICATE/i.test(message)) {
     return `Inbox authentication failed. Check that IMAP is enabled for this mailbox and that the saved app password is valid. Details: ${message}`;
   }
@@ -323,15 +324,15 @@ async function fetchInboxMessages(runtimeConfig = config) {
 
   await client.connect();
   const messages = [];
-  const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
   const selfEmail = normalizeEmail(runtimeConfig.fromEmail || runtimeConfig.smtpUser || imapConfig.imapUser);
   const lock = await client.getMailboxLock("INBOX");
 
   try {
-    const ids = await client.search({ since });
-    if (!ids.length) return [];
-    const recentIds = ids.slice(-50);
-    for await (const item of client.fetch(recentIds, { uid: true, envelope: true, source: true, internalDate: true })) {
+    const totalMessages = Number(client.mailbox.exists || 0);
+    if (!totalMessages) return [];
+    const firstMessage = Math.max(1, totalMessages - 49);
+
+    for await (const item of client.fetch(`${firstMessage}:*`, { uid: true, envelope: true, source: true, internalDate: true }, { uid: false })) {
       const parsed = await simpleParser(item.source);
       const from = parsed.from?.value?.[0] || {};
       const email = normalizeEmail(from.address);
