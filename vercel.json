@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "*.html", "use": "@vercel/static" },
+    { "src": "*.css", "use": "@vercel/static" },
+    { "src": "*.js", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/", "dest": "/login.html" },
+    { "src": "/login", "dest": "/login.html" },
+    { "src": "/setup", "dest": "/setup.html" },
+    { "src": "/mailbox", "dest": "/mailbox.html" },
+    { "src": "/audience", "dest": "/audience.html" },
+    { "src": "/campaign", "dest": "/campaign.html" },
+    { "src": "/launch", "dest": "/launch.html" },
+    { "src": "/dashboard", "dest": "/dashboard.html" },
+    { "src": "/inbox", "dest": "/inbox.html" },
+    { "src": "/(.*\\.html)", "dest": "/$1" },
+    { "src": "/(.*\\.css)", "dest": "/$1" },
+    { "src": "/(.*\\.js)", "dest": "/$1" }
+  ]
+}
