@@ -208,6 +208,20 @@ function createTransport(runtimeConfig = config) {
   });
 }
 
+function formatSmtpError(error) {
+  const message = error?.message || "Unknown SMTP error.";
+  if (/wrong version|tls_validate_record_header/i.test(message)) {
+    return "SMTP connection failed: port 587 must use STARTTLS, not SSL/TLS. Use smtp.office365.com, port 587, with SSL/TLS off.";
+  }
+  if (/timeout|timed out|etimedout|greeting never received/i.test(message)) {
+    return "SMTP connection timed out. Check that SMTP AUTH is enabled for this Microsoft 365 mailbox, then try smtp.office365.com on port 587 with SSL/TLS off.";
+  }
+  if (/auth|authentication|login|535|5\.7\.3|5\.7\.57/i.test(message)) {
+    return `SMTP authentication failed. Check the mailbox password/app password and confirm SMTP AUTH is enabled. Details: ${message}`;
+  }
+  return `SMTP connection failed: ${message}`;
+}
+
 async function sendOrSimulate({ contact, email, campaign, token, runtimeConfig = config }) {
   const transport = createTransport(runtimeConfig);
   const subject = email.subject
@@ -316,14 +330,8 @@ app.post("/api/mail/connect", async (request, response) => {
   try {
     await createTransport(nextConfig).verify();
   } catch (error) {
-    const tlsVersionMismatch = /wrong version|tls_validate_record_header/i.test(error.message || "");
-    const timedOut = /timeout|timed out|etimedout|greeting never received/i.test(error.message || "");
     return response.status(400).json({
-      message: tlsVersionMismatch
-        ? "SMTP connection failed: port 587 must use STARTTLS, not SSL/TLS. SSL is now forced off for port 587; try again with smtp.office365.com and port 587."
-        : timedOut
-          ? "SMTP connection timed out. Check that SMTP AUTH is enabled for this Microsoft 365 mailbox, then try smtp.office365.com on port 587 with SSL/TLS off."
-        : `SMTP connection failed: ${error.message}`,
+      message: formatSmtpError(error),
     });
   }
 
@@ -543,29 +551,48 @@ app.post("/api/test/send", async (request, response) => {
       };
     });
 
-  const results = [];
-  for (const contact of selectedContacts) {
+  const attempts = await Promise.all(selectedContacts.map(async (contact) => {
     const token = crypto.createHash("sha256").update(`${contact.email}:${campaign.id || campaign.offer}:test`).digest("hex");
-    const result = await sendOrSimulate({
-      contact,
-      email: campaign.emails[0],
-      campaign,
-      token,
-      runtimeConfig,
-    });
+    try {
+      const result = await sendOrSimulate({
+        contact,
+        email: campaign.emails[0],
+        campaign,
+        token,
+        runtimeConfig,
+      });
 
-    results.push(result);
-    db.events.unshift({
-      id: makeId("event"),
-      type: result.mode === "sent" ? "test-sent" : "test-simulation",
-      contactEmail: contact.email,
-      campaignName: campaign.offer,
-      subject: result.subject,
-      createdAt: new Date().toISOString(),
-    });
-  }
+      return {
+        result,
+        event: {
+          id: makeId("event"),
+          type: result.mode === "sent" ? "test-sent" : "test-simulation",
+          contactEmail: contact.email,
+          campaignName: campaign.offer,
+          subject: result.subject,
+          createdAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      return { failure: { email: contact.email, message: formatSmtpError(error) } };
+    }
+  }));
+
+  const results = attempts.map((attempt) => attempt.result).filter(Boolean);
+  const failures = attempts.map((attempt) => attempt.failure).filter(Boolean);
+  attempts
+    .map((attempt) => attempt.event)
+    .filter(Boolean)
+    .forEach((event) => db.events.unshift(event));
 
   await writeDb(db);
+  if (failures.length) {
+    return response.status(400).json({
+      message: `${failures.length} test email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
+      processed: results.length,
+      failures,
+    });
+  }
   response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results });
 });
 
@@ -662,6 +689,14 @@ app.get("/unsubscribe/:token", async (request, response) => {
   });
   await writeDb(db);
   response.send("<h1>You have been unsubscribed</h1><p>Your marketing opt-out has been recorded.</p>");
+});
+
+app.use((error, request, response, next) => {
+  if (!request.path.startsWith("/api/")) return next(error);
+  console.error(error);
+  response.status(500).json({
+    message: error?.message ? `Server error: ${error.message}` : "Server error. Please try again.",
+  });
 });
 
 if (!process.env.VERCEL) {

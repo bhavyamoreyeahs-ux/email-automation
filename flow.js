@@ -23,12 +23,14 @@ async function apiFetch(path, options) {
     try {
       body = JSON.parse(text);
     } catch {
-      body = { message: text || `Request failed (${response.status}).` };
+      body = { message: /<[^>]+>/.test(text) ? "" : text };
     }
     const apiMissing = path.startsWith("/api/") && response.status === 404;
     const fallback = apiMissing
       ? "Backend API is not available on this deployment yet. Redeploy the latest version and try again."
-      : `Request failed (${response.status}).`;
+      : response.status >= 500
+        ? "Server error. Please try again, or check the SMTP connection."
+        : `Request failed (${response.status}).`;
     throw new Error((body.issues || [apiMissing ? fallback : body.message || fallback]).join(" "));
   }
   return response.json();
