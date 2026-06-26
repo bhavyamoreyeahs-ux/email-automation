@@ -29,8 +29,8 @@ const defaultConfig = {
 
 let config = { ...defaultConfig };
 const authSecret = process.env.AUTH_SECRET || "email-automation-local-auth-secret";
-const adminEmail = process.env.ADMIN_EMAIL || "admin@moreyeahs.com";
-const adminPassword = process.env.ADMIN_PASSWORD || "moreyeahs-admin";
+const adminEmail = process.env.ADMIN_EMAIL || "bhavya.moreyeahs@gmail.com";
+const adminPassword = process.env.ADMIN_PASSWORD || "Letsgoo@000";
 
 const emptyDb = {
   contacts: [],
