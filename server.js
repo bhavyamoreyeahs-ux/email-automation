@@ -75,6 +75,11 @@ function mergeConfig(mailConfig = {}) {
     smtpSecure: Boolean(mailConfig.smtpSecure ?? config.smtpSecure ?? defaultConfig.smtpSecure),
     smtpUser: mailConfig.smtpUser || config.smtpUser || defaultConfig.smtpUser,
     smtpPass: mailConfig.smtpPass || config.smtpPass || defaultConfig.smtpPass,
+    imapHost: mailConfig.imapHost || config.imapHost || defaultConfig.imapHost || "",
+    imapPort: Number(mailConfig.imapPort || config.imapPort || defaultConfig.imapPort || 993),
+    imapSecure: Boolean(mailConfig.imapSecure ?? config.imapSecure ?? defaultConfig.imapSecure ?? true),
+    imapUser: mailConfig.imapUser || config.imapUser || defaultConfig.imapUser || "",
+    imapPass: mailConfig.imapPass || config.imapPass || defaultConfig.imapPass || "",
   };
 }
 
@@ -367,7 +372,7 @@ function formatInboxError(error) {
   const details = [error?.message, error?.responseText, error?.code].filter(Boolean).join(" - ");
   const message = details || "Unknown inbox sync error.";
   if (/auth|authentication|login|invalid credentials|AUTHENTICATE/i.test(message)) {
-    return `Inbox authentication failed. Check that IMAP is enabled for this mailbox and that the saved app password is valid. Details: ${message}`;
+    return `Inbox authentication failed. SMTP sending can still work while Microsoft 365 blocks IMAP. Enable IMAP for this mailbox, confirm the IMAP username/password, or use the manual reply capture for now. Details: ${message}`;
   }
   if (/timeout|timed out|etimedout/i.test(message)) {
     return "Inbox sync timed out. Check that IMAP is enabled for this mailbox and try again.";
@@ -524,6 +529,10 @@ app.get("/api/mail/config", async (_request, response) => {
     fromEmail: runtimeConfig.fromEmail || "",
     replyTo: runtimeConfig.replyTo || "",
     address: runtimeConfig.address || "",
+    imapHost: runtimeConfig.imapHost || "",
+    imapPort: runtimeConfig.imapPort || 993,
+    imapSecure: runtimeConfig.imapSecure !== false,
+    imapUser: runtimeConfig.imapUser || "",
     connected: Boolean(runtimeConfig.smtpHost && runtimeConfig.smtpUser),
   });
 });
@@ -548,6 +557,11 @@ app.post("/api/mail/connect", async (request, response) => {
     fromEmail: incoming.fromEmail || incoming.smtpUser,
     replyTo: incoming.replyTo || incoming.smtpUser,
     address: incoming.address || "",
+    imapHost: incoming.imapHost || "",
+    imapPort: Number(incoming.imapPort || 993),
+    imapSecure: incoming.imapSecure !== false,
+    imapUser: incoming.imapUser || incoming.smtpUser || "",
+    imapPass: incoming.imapPass || incoming.smtpPass || "",
   }));
 
   try {

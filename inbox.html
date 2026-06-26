@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MoreYeahs AI Inbox</title>
-    <link rel="stylesheet" href="styles.css?v=20260626b" />
+    <link rel="stylesheet" href="styles.css?v=20260626c" />
   </head>
   <body>
     <div class="app-shell">
@@ -55,6 +55,7 @@
               </div>
               <button class="ghost-button compact" id="syncInboxButton" type="button">Sync replies</button>
             </div>
+            <p class="muted small" id="inboxSyncStatus">Sync uses IMAP. If Microsoft blocks IMAP, add the reply manually below and continue the workflow.</p>
             <div class="activity-log" id="inboxList"></div>
           </article>
 
@@ -69,11 +70,27 @@
               <p class="muted">Select a message to view and respond.</p>
             </div>
           </article>
+
+          <article class="panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Fallback</span>
+                <h2>Add reply manually</h2>
+              </div>
+            </div>
+            <form id="manualReplyForm" class="campaign-form compact-form">
+              <label>Name<input id="manualReplyNameInput" type="text" placeholder="Prospect name" /></label>
+              <label>Email<input id="manualReplyEmailInput" type="email" placeholder="prospect@company.com" required /></label>
+              <label class="full-span">Subject<input id="manualReplySubjectInput" type="text" placeholder="Re: your campaign email" required /></label>
+              <label class="full-span">Reply body<textarea id="manualReplyBodyInput" rows="7" placeholder="Paste the prospect's reply here" required></textarea></label>
+              <button class="primary-button full-span" type="submit">Add to inbox</button>
+            </form>
+          </article>
         </section>
       </main>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="inbox.js?v=20260626b"></script>
+    <script src="inbox.js?v=20260626c"></script>
   </body>
 </html>

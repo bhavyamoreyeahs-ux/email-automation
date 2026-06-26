@@ -3,6 +3,8 @@ const replyPanel = document.querySelector('#replyPanel');
 const inboxCount = document.querySelector('#inboxCount');
 const toast = document.querySelector('#toast');
 const syncInboxButton = document.querySelector('#syncInboxButton');
+const inboxSyncStatus = document.querySelector('#inboxSyncStatus');
+const manualReplyForm = document.querySelector('#manualReplyForm');
 const mailboxKey = 'emailAutomationMailbox';
 const localInboxKey = 'emailAutomationInbox';
 const sessionKey = 'emailAutomationSession';
@@ -80,7 +82,7 @@ function renderInbox() {
   inboxCount.textContent = String(messages.length);
 
   if (!messages.length) {
-    inboxList.innerHTML = '<div class="empty-state"><strong>No synced replies yet</strong><span>Click Sync replies after prospects respond to your campaign.</span></div>';
+    inboxList.innerHTML = '<div class="empty-state"><strong>No replies yet</strong><span>Sync replies over IMAP, or add a reply manually if Microsoft blocks inbox access.</span></div>';
     return;
   }
 
@@ -200,11 +202,13 @@ async function syncInbox() {
   const mailbox = savedMailboxPayload();
   if (!mailbox) {
     showToast('Reconnect SMTP once so Inbox can use the saved mailbox credentials.');
+    if (inboxSyncStatus) inboxSyncStatus.textContent = 'Mailbox credentials are not saved in this browser yet. Reconnect Mailbox first.';
     return;
   }
 
   syncInboxButton.disabled = true;
   setBusy(syncInboxButton, true, 'Syncing...');
+  if (inboxSyncStatus) inboxSyncStatus.textContent = 'Connecting to the mailbox over IMAP...';
   try {
     const result = await apiFetch('/api/inbox/sync', {
       method: 'POST',
@@ -212,12 +216,45 @@ async function syncInbox() {
     });
     saveInbox(result.messages || []);
     renderInbox();
+    if (inboxSyncStatus) inboxSyncStatus.textContent = `Last sync completed. ${result.synced} message${result.synced === 1 ? '' : 's'} returned.`;
     showToast(`Synced ${result.synced} inbox messages.`);
   } catch (error) {
+    if (inboxSyncStatus) inboxSyncStatus.textContent = `${error.message} You can add the reply manually below while IMAP is being enabled.`;
     showToast(error.message);
   } finally {
     setBusy(syncInboxButton, false);
   }
+}
+
+function addManualReply(event) {
+  event.preventDefault();
+  const email = document.querySelector('#manualReplyEmailInput').value.trim().toLowerCase();
+  const name = document.querySelector('#manualReplyNameInput').value.trim();
+  const subject = document.querySelector('#manualReplySubjectInput').value.trim();
+  const body = document.querySelector('#manualReplyBodyInput').value.trim();
+
+  if (!email || !subject || !body) {
+    showToast('Email, subject, and reply body are required.');
+    return;
+  }
+
+  const message = {
+    id: `manual_${Date.now()}_${email.replace(/[^a-z0-9]/gi, '')}`,
+    name,
+    email,
+    subject,
+    body,
+    preview: body.slice(0, 180),
+    receivedAt: new Date().toISOString(),
+    source: 'manual',
+  };
+
+  saveInbox([message]);
+  renderInbox();
+  selectMessage(message);
+  manualReplyForm.reset();
+  if (inboxSyncStatus) inboxSyncStatus.textContent = 'Manual reply added. It now counts as a reply in Inbox and dashboard reporting.';
+  showToast('Reply added to inbox.');
 }
 
 async function sendReply(message, mode) {
@@ -258,6 +295,7 @@ async function sendReply(message, mode) {
 }
 
 syncInboxButton?.addEventListener('click', syncInbox);
+manualReplyForm?.addEventListener('submit', addManualReply);
 saveInbox(getJson(localInboxKey, []));
 renderInbox();
 loadInbox();

@@ -662,6 +662,11 @@ h3 {
   margin-top: 22px;
 }
 
+.campaign-form.compact-form {
+  gap: 12px;
+  margin-top: 16px;
+}
+
 .campaign-form + .muted {
   margin-top: 12px;
 }
@@ -702,6 +707,14 @@ textarea:focus {
 
 .full-span {
   grid-column: 1 / -1;
+}
+
+.form-divider {
+  display: grid;
+  gap: 5px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 .pill {

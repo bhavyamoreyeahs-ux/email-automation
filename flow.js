@@ -388,6 +388,11 @@ const mailboxForm = document.querySelector("#mailboxForm");
 if (mailboxForm) {
   const smtpPortInput = document.querySelector("#smtpPortInput");
   const smtpSecureInput = document.querySelector("#smtpSecureInput");
+  const imapHostInput = document.querySelector("#imapHostInput");
+  const imapPortInput = document.querySelector("#imapPortInput");
+  const imapUserInput = document.querySelector("#imapUserInput");
+  const imapPasswordInput = document.querySelector("#imapPasswordInput");
+  const imapSecureInput = document.querySelector("#imapSecureInput");
   const savedMailbox = getJson(mailboxKey, {});
   const mailConnectionStatus = document.querySelector("#mailConnectionStatus");
   if (savedMailbox.connected && mailConnectionStatus) {
@@ -398,33 +403,41 @@ if (mailboxForm) {
     if (port === 587) smtpSecureInput.checked = false;
     if (port === 465) smtpSecureInput.checked = true;
   };
+  const inferImapHost = (smtpHost = "") => {
+    const host = smtpHost.toLowerCase();
+    if (host.includes("office365") || host.includes("outlook")) return "outlook.office365.com";
+    if (host.includes("gmail")) return "imap.gmail.com";
+    return "";
+  };
+  const applyMailboxValues = (mailbox = {}) => {
+    document.querySelector("#smtpHostInput").value = mailbox.smtpHost || "";
+    smtpPortInput.value = mailbox.smtpPort || 587;
+    document.querySelector("#smtpUserInput").value = mailbox.smtpUser || "";
+    document.querySelector("#smtpPasswordInput").value = savedMailbox.smtpPass || "";
+    document.querySelector("#fromNameInput").value = mailbox.fromName || "";
+    document.querySelector("#fromEmailInput").value = mailbox.fromEmail || "";
+    document.querySelector("#replyToInput").value = mailbox.replyTo || "";
+    document.querySelector("#companyAddressInput").value = mailbox.address || "";
+    smtpSecureInput.checked = Boolean(mailbox.smtpSecure);
+    imapHostInput.value = mailbox.imapHost || inferImapHost(mailbox.smtpHost || "");
+    imapPortInput.value = mailbox.imapPort || 993;
+    imapUserInput.value = mailbox.imapUser || mailbox.smtpUser || "";
+    imapPasswordInput.value = savedMailbox.imapPass || "";
+    imapSecureInput.checked = mailbox.imapSecure !== false;
+    syncSecureWithPort();
+  };
 
   apiFetch("/api/mail/config").then((config) => {
     const mergedConfig = { ...savedMailbox, ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "" && value !== undefined && value !== null)) };
-    document.querySelector("#smtpHostInput").value = mergedConfig.smtpHost || "";
-    smtpPortInput.value = mergedConfig.smtpPort || 587;
-    document.querySelector("#smtpUserInput").value = mergedConfig.smtpUser || "";
-    document.querySelector("#smtpPasswordInput").value = savedMailbox.smtpPass || "";
-    document.querySelector("#fromNameInput").value = mergedConfig.fromName || "";
-    document.querySelector("#fromEmailInput").value = mergedConfig.fromEmail || "";
-    document.querySelector("#replyToInput").value = mergedConfig.replyTo || "";
-    document.querySelector("#companyAddressInput").value = mergedConfig.address || "";
-    smtpSecureInput.checked = Boolean(mergedConfig.smtpSecure);
-    syncSecureWithPort();
+    applyMailboxValues(mergedConfig);
   }).catch(() => {
-    document.querySelector("#smtpHostInput").value = savedMailbox.smtpHost || "";
-    smtpPortInput.value = savedMailbox.smtpPort || 587;
-    document.querySelector("#smtpUserInput").value = savedMailbox.smtpUser || "";
-    document.querySelector("#smtpPasswordInput").value = savedMailbox.smtpPass || "";
-    document.querySelector("#fromNameInput").value = savedMailbox.fromName || "";
-    document.querySelector("#fromEmailInput").value = savedMailbox.fromEmail || "";
-    document.querySelector("#replyToInput").value = savedMailbox.replyTo || "";
-    document.querySelector("#companyAddressInput").value = savedMailbox.address || "";
-    smtpSecureInput.checked = Boolean(savedMailbox.smtpSecure);
-    syncSecureWithPort();
+    applyMailboxValues(savedMailbox);
   });
 
   smtpPortInput.addEventListener("input", syncSecureWithPort);
+  document.querySelector("#smtpHostInput").addEventListener("blur", () => {
+    if (!imapHostInput.value.trim()) imapHostInput.value = inferImapHost(document.querySelector("#smtpHostInput").value);
+  });
 
   mailboxForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -442,6 +455,11 @@ if (mailboxForm) {
         replyTo: document.querySelector("#replyToInput").value.trim(),
         address: document.querySelector("#companyAddressInput").value.trim(),
         smtpPass: document.querySelector("#smtpPasswordInput").value,
+        imapHost: imapHostInput.value.trim(),
+        imapPort: imapPortInput.value || 993,
+        imapSecure: imapSecureInput.checked,
+        imapUser: imapUserInput.value.trim() || document.querySelector("#smtpUserInput").value.trim(),
+        imapPass: imapPasswordInput.value || document.querySelector("#smtpPasswordInput").value,
       };
       await apiFetch("/api/mail/connect", {
         method: "POST",

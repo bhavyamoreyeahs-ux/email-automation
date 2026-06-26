@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Mailbox - Email Automation</title><link rel="stylesheet" href="styles.css?v=20260626b" /></head>
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Mailbox - Email Automation</title><link rel="stylesheet" href="styles.css?v=20260626c" /></head>
   <body>
     <div class="app-shell">
       <aside class="sidebar"><div class="brand"><div class="brand-mark">M</div><div><strong>MoreYeahs</strong><span>AI Email Automation</span></div></div><nav class="nav-list"><a href="index.html">Journey Home</a><details class="nav-dropdown" open><summary>Campaign Studio</summary><a href="setup.html">Setup</a><a class="active" href="mailbox.html">Mailbox</a><a href="audience.html">Audience</a><a href="campaign.html">Campaign</a><a href="launch.html">Launch</a></details><a href="dashboard.html">Dashboard</a><a href="inbox.html">Inbox</a></nav></aside>
@@ -17,6 +17,15 @@
             <label>Reply-to<input id="replyToInput" type="email" placeholder="reply@company.com" /></label>
             <label>Company address<input id="companyAddressInput" type="text" placeholder="Postal address for footer compliance" /></label>
             <label class="checkbox-inline full-span"><input id="smtpSecureInput" type="checkbox" /> Use SSL/TLS only for port 465. Leave this off for Office 365 or Gmail on port 587.</label>
+            <div class="form-divider full-span">
+              <span class="eyebrow">Receiving replies</span>
+              <p class="muted small">SMTP sends email. IMAP reads replies for the Inbox. For Microsoft 365, IMAP must be enabled for this mailbox or reply sync will be rejected even when sending works.</p>
+            </div>
+            <label>IMAP host<input id="imapHostInput" type="text" placeholder="outlook.office365.com" /></label>
+            <label>IMAP port<input id="imapPortInput" type="number" value="993" /></label>
+            <label>IMAP username<input id="imapUserInput" type="email" placeholder="Same as username" /></label>
+            <label>IMAP password<input id="imapPasswordInput" type="password" placeholder="Leave blank to use SMTP app password" /></label>
+            <label class="checkbox-inline full-span"><input id="imapSecureInput" type="checkbox" checked /> Use SSL/TLS for IMAP, usually port 993.</label>
             <button class="primary-button full-span" type="submit">Verify and save mailbox</button>
           </form>
           <p class="muted small" id="mailConnectionStatus">Mailbox is not connected yet.</p>
@@ -24,6 +33,6 @@
       </main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="flow.js?v=20260626b"></script>
+    <script src="flow.js?v=20260626c"></script>
   </body>
 </html>
