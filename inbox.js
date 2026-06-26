@@ -12,7 +12,22 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add('show');
   window.clearTimeout(showToast.timeout);
-  showToast.timeout = window.setTimeout(() => toast.classList.remove('show'), 2600);
+  showToast.timeout = window.setTimeout(() => toast.classList.remove('show'), Math.min(5200, Math.max(2600, String(message).length * 38)));
+}
+
+function setBusy(control, busy, label = 'Working...') {
+  if (!control) return;
+  if (busy) {
+    control.dataset.originalText = control.textContent;
+    control.textContent = label;
+    control.disabled = true;
+    control.classList.add('is-busy');
+  } else {
+    control.textContent = control.dataset.originalText || control.textContent;
+    control.disabled = false;
+    control.classList.remove('is-busy');
+    delete control.dataset.originalText;
+  }
 }
 
 async function apiFetch(path, options) {
@@ -60,7 +75,7 @@ function renderInbox() {
   inboxCount.textContent = String(messages.length);
 
   if (!messages.length) {
-    inboxList.innerHTML = '<p class="muted">No inbound replies yet.</p>';
+    inboxList.innerHTML = '<div class="empty-state"><strong>No synced replies yet</strong><span>Click Sync replies after prospects respond to your campaign.</span></div>';
     return;
   }
 
@@ -184,7 +199,7 @@ async function syncInbox() {
   }
 
   syncInboxButton.disabled = true;
-  syncInboxButton.textContent = 'Syncing...';
+  setBusy(syncInboxButton, true, 'Syncing...');
   try {
     const result = await apiFetch('/api/inbox/sync', {
       method: 'POST',
@@ -196,8 +211,7 @@ async function syncInbox() {
   } catch (error) {
     showToast(error.message);
   } finally {
-    syncInboxButton.disabled = false;
-    syncInboxButton.textContent = 'Sync replies';
+    setBusy(syncInboxButton, false);
   }
 }
 
@@ -210,22 +224,32 @@ async function sendReply(message, mode) {
     showToast('Please enter a reply before sending.');
     return;
   }
+  const button = mode === 'manual' ? document.querySelector('#sendManualReplyButton') : document.querySelector('#sendAutoReplyButton');
+  setBusy(button, true, 'Sending...');
 
-  const response = await fetch(`/api/inbox/${message.id}/reply`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body, mode, mailbox: savedMailboxPayload(), message }),
-  });
+  try {
+    const response = await fetch(`/api/inbox/${message.id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body, mode, mailbox: savedMailboxPayload(), message }),
+    });
 
-  const result = await response.json();
-  if (!response.ok) {
-    showToast(result.message || 'Reply failed.');
-    return;
+    const result = await response.json();
+    if (!response.ok) {
+      showToast(result.message || 'Reply failed.');
+      return;
+    }
+
+    showToast(`Reply sent via ${result.delivery.mode}.`);
+    await loadInbox();
+  } catch (error) {
+    showToast(error.message || 'Reply failed.');
+  } finally {
+    setBusy(button, false);
   }
-
-  showToast(`Reply sent via ${result.delivery.mode}.`);
-  await loadInbox();
 }
 
 syncInboxButton?.addEventListener('click', syncInbox);
+saveInbox(getJson(localInboxKey, []));
+renderInbox();
 loadInbox();

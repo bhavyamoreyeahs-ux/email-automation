@@ -12,7 +12,22 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
   window.clearTimeout(showToast.timeout);
-  showToast.timeout = window.setTimeout(() => toast.classList.remove("show"), 2400);
+  showToast.timeout = window.setTimeout(() => toast.classList.remove("show"), Math.min(5200, Math.max(2400, String(message).length * 38)));
+}
+
+function setBusy(control, busy, label = "Working...") {
+  if (!control) return;
+  if (busy) {
+    control.dataset.originalText = control.textContent;
+    control.textContent = label;
+    control.disabled = true;
+    control.classList.add("is-busy");
+  } else {
+    control.textContent = control.dataset.originalText || control.textContent;
+    control.disabled = false;
+    control.classList.remove("is-busy");
+    delete control.dataset.originalText;
+  }
 }
 
 async function apiFetch(path, options) {
@@ -51,6 +66,10 @@ function setJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function broadcastDashboardUpdate() {
+  localStorage.setItem("emailAutomationLastUpdate", new Date().toISOString());
+}
+
 function mergeEvents(events = []) {
   const existing = getJson(localEventsKey, []);
   const byId = new Map(existing.map((event) => [event.id, event]));
@@ -61,6 +80,7 @@ function mergeEvents(events = []) {
       .sort((a, b) => new Date(b.createdAt || b.scheduledAt || 0) - new Date(a.createdAt || a.scheduledAt || 0))
       .slice(0, 200),
   );
+  broadcastDashboardUpdate();
 }
 
 function mergedEvents(apiEvents = []) {
@@ -197,6 +217,8 @@ function renderJourneyCards(progress) {
     const step = card.dataset.stepCard;
     card.classList.toggle("locked", !availability[step]);
     card.classList.toggle("complete", complete[step]);
+    if (card.dataset.bound === "true") return;
+    card.dataset.bound = "true";
     card.addEventListener("click", (event) => {
       if (!availability[step]) {
         event.preventDefault();
@@ -274,6 +296,13 @@ function parseCsv(csv) {
   );
 }
 
+function validateContacts(contacts) {
+  if (!contacts.length) throw new Error("Add at least one contact row before importing.");
+  const valid = contacts.filter((contact) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(contact.email || "")));
+  if (!valid.length) throw new Error("No valid email addresses found. Your first row must include an email column.");
+  return valid;
+}
+
 function parseRecipients(value) {
   return [...new Set(String(value || "").split(/[\n,;]/).map((email) => email.trim().toLowerCase()).filter(Boolean))];
 }
@@ -304,6 +333,7 @@ if (setupForm) {
 
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    const button = setupForm.querySelector("button[type='submit']");
     const nextSetup = {
       offer: document.querySelector("#offerInput").value.trim(),
       audience: document.querySelector("#audienceInput").value.trim(),
@@ -313,6 +343,8 @@ if (setupForm) {
       fromName: document.querySelector("#fromNameInput").value.trim(),
       replyTo: document.querySelector("#replyToInput").value.trim(),
     };
+    if (!nextSetup.offer || !nextSetup.audience || !nextSetup.proof) return showToast("Complete the required setup fields first.");
+    setBusy(button, true, "Saving setup...");
     setJson(setupKey, nextSetup);
     setJson(campaignKey, createCampaignFromSetup(nextSetup));
     window.location.href = "mailbox.html";
@@ -363,7 +395,9 @@ if (mailboxForm) {
 
   mailboxForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const button = mailboxForm.querySelector("button[type='submit']");
     try {
+      setBusy(button, true, "Verifying mailbox...");
       syncSecureWithPort();
       const nextMailbox = {
         smtpHost: document.querySelector("#smtpHostInput").value.trim(),
@@ -386,6 +420,8 @@ if (mailboxForm) {
       window.setTimeout(() => (window.location.href = "audience.html"), 700);
     } catch (error) {
       showToast(error.message);
+    } finally {
+      setBusy(button, false);
     }
   });
 }
@@ -420,14 +456,19 @@ document.querySelector("#csvFileInput")?.addEventListener("change", async (event
   }
 });
 document.querySelector("#importContactsButton")?.addEventListener("click", async () => {
+  const button = document.querySelector("#importContactsButton");
   try {
-    const contacts = parseCsv(document.querySelector("#contactsInput").value);
+    setBusy(button, true, "Importing...");
+    const contacts = validateContacts(parseCsv(document.querySelector("#contactsInput").value));
     const result = await apiFetch("/api/contacts/import", { method: "POST", body: JSON.stringify({ contacts }) });
     setJson(localContactsKey, result.contacts || contacts);
+    broadcastDashboardUpdate();
     document.querySelector("#contactImportStatus").textContent = `${result.activeContacts} active contacts imported`;
     showToast("Contacts imported and segmented.");
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setBusy(button, false);
   }
 });
 
@@ -473,6 +514,15 @@ function saveCampaignEditor() {
   return campaign;
 }
 
+document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-subject], [data-body], #followupOneMode, #followupOneDays, #followupTwoMode, #followupTwoDays")) {
+    window.clearTimeout(saveCampaignEditor.timeout);
+    saveCampaignEditor.timeout = window.setTimeout(() => {
+      saveCampaignEditor();
+    }, 350);
+  }
+});
+
 renderCampaignEditor();
 document.querySelector("#regenerateCampaignButton")?.addEventListener("click", () => {
   const setup = getJson(setupKey);
@@ -482,17 +532,21 @@ document.querySelector("#regenerateCampaignButton")?.addEventListener("click", (
   showToast("Campaign regenerated.");
 });
 document.querySelector("#sendTestButton")?.addEventListener("click", async () => {
+  const button = document.querySelector("#sendTestButton");
   const campaign = saveCampaignEditor();
   const recipients = parseRecipients(document.querySelector("#testRecipientsInput").value);
   if (!campaign) return showToast("Complete setup first.");
   if (!recipients.length) return showToast("Add at least one test recipient.");
   try {
+    setBusy(button, true, "Sending test...");
     const result = await apiFetch("/api/test/send", { method: "POST", body: JSON.stringify({ campaign, recipients, mailbox: savedMailboxPayload() }) });
     rememberSendMode(result);
     mergeEvents((result.events || []).length ? result.events : fallbackEventsFromResults(result, campaign, "test-"));
     showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} test emails.`);
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setBusy(button, false);
   }
 });
 
@@ -510,7 +564,7 @@ async function renderLaunchActivity() {
   const events = mergedEvents(await apiFetch("/api/events").catch(() => []));
   activityLog.innerHTML = "";
   if (!events.length) {
-    activityLog.innerHTML = '<p class="muted">No activity yet.</p>';
+    activityLog.innerHTML = '<div class="empty-state"><strong>No activity yet</strong><span>Run the opener or send a selected test to see activity here immediately.</span></div>';
     return;
   }
   events.forEach((event) => {
@@ -537,12 +591,15 @@ async function renderLaunchActivity() {
 }
 
 document.querySelector("#runAutomationButton")?.addEventListener("click", async () => {
+  const button = document.querySelector("#runAutomationButton");
   const campaign = getJson(campaignKey);
   if (!campaign?.emails?.length) return showToast("Complete campaign setup first.");
   try {
+    setBusy(button, true, "Sending opener...");
     const contacts = await getContacts();
     const limit = Number(document.querySelector("#sendLimitInput").value || 25);
     const selectedContacts = contacts.slice(0, limit);
+    if (!selectedContacts.length) throw new Error("Import contacts before launching the opener.");
     const result = await apiFetch("/api/automation/run", {
       method: "POST",
       body: JSON.stringify({
@@ -562,6 +619,8 @@ document.querySelector("#runAutomationButton")?.addEventListener("click", async 
     renderLaunchActivity();
   } catch (error) {
     showToast(error.message);
+  } finally {
+    setBusy(button, false);
   }
 });
 document.querySelector("#refreshActivityButton")?.addEventListener("click", renderLaunchActivity);

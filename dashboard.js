@@ -14,6 +14,7 @@ const toast = document.querySelector("#toast");
 const localEventsKey = "emailAutomationEvents";
 const localContactsKey = "emailAutomationContacts";
 const localInboxKey = "emailAutomationInbox";
+const lastUpdateKey = "emailAutomationLastUpdate";
 
 const colors = ["#1f6feb", "#0891b2", "#15803d", "#b45309", "#7c3aed", "#dc2626", "#64748b"];
 const sentTypes = new Set(["sent", "test-sent", "followup-sent"]);
@@ -238,10 +239,13 @@ async function loadDashboard({ quiet = false } = {}) {
 
 refreshDashboardButton.addEventListener("click", () => loadDashboard());
 window.addEventListener("storage", (event) => {
-  if ([localEventsKey, localContactsKey, localInboxKey].includes(event.key)) {
+  if ([localEventsKey, localContactsKey, localInboxKey, lastUpdateKey].includes(event.key)) {
     renderDashboardSnapshot(localDashboardData());
   }
 });
 
 loadDashboard();
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) loadDashboard({ quiet: true });
+});
 window.setInterval(() => loadDashboard({ quiet: true }), 5000);

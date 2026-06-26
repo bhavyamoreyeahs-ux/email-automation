@@ -41,6 +41,14 @@ button {
   cursor: pointer;
 }
 
+button:disabled,
+button.is-busy {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+  box-shadow: none;
+}
+
 a {
   color: inherit;
 }
@@ -446,6 +454,13 @@ h3 {
   transform: translateY(-1px);
 }
 
+.primary-button:disabled:hover,
+.ghost-button:disabled:hover,
+.primary-button.is-busy:hover,
+.ghost-button.is-busy:hover {
+  transform: none;
+}
+
 .primary-button:hover {
   background: var(--primary-dark);
 }
@@ -645,6 +660,10 @@ h3 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin-top: 22px;
+}
+
+.campaign-form + .muted {
+  margin-top: 12px;
 }
 
 label {
@@ -1031,6 +1050,10 @@ textarea:focus {
   background: #f9fbff;
 }
 
+.manual-draft-editor textarea {
+  min-height: 190px;
+}
+
 .manual-draft-editor.hidden {
   display: none;
 }
@@ -1224,6 +1247,20 @@ textarea:focus {
   padding-right: 2px;
 }
 
+.empty-state {
+  display: grid;
+  gap: 6px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 16px;
+  color: var(--muted);
+}
+
+.empty-state strong {
+  color: var(--ink);
+}
+
 .activity-log::-webkit-scrollbar {
   width: 8px;
 }
@@ -1243,6 +1280,7 @@ textarea:focus {
   padding: 12px;
   background: #fbfdff;
   cursor: pointer;
+  min-width: 0;
 }
 
 .activity-item:hover {
@@ -1269,6 +1307,7 @@ textarea:focus {
   display: grid;
   gap: 4px;
   flex: 1;
+  min-width: 0;
 }
 
 .activity-actions {
@@ -1282,6 +1321,7 @@ textarea:focus {
 .activity-item strong,
 .activity-item span {
   display: block;
+  overflow-wrap: anywhere;
 }
 
 .activity-item span {
@@ -1328,6 +1368,10 @@ textarea:focus {
     position: static;
     height: auto;
     border-radius: 0 0 8px 8px;
+  }
+
+  .sidebar-panel {
+    display: none;
   }
 
   .nav-list {
@@ -1395,8 +1439,23 @@ textarea:focus {
   }
 
   h1 {
-    font-size: 2.2rem;
+    font-size: 2rem;
     line-height: 1;
+  }
+
+  .narrow-workspace h1 {
+    font-size: 2.15rem;
+  }
+
+  .journey-home-card {
+    min-height: auto;
+  }
+
+  .panel,
+  .builder-panel,
+  .preview-panel,
+  .status-strip article {
+    padding: 16px;
   }
 
   .status-strip strong {
