@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Login - Email Automation</title>
-    <link rel="stylesheet" href="styles.css?v=20260626a" />
+    <link rel="stylesheet" href="styles.css?v=20260626b" />
   </head>
   <body>
     <main class="standalone-page">
@@ -19,7 +19,7 @@
         <div>
           <span class="eyebrow">Step 1</span>
           <h1>Login to your workspace.</h1>
-          <p class="muted">This prototype uses a local browser session. No password is required.</p>
+          <p class="muted">Use your workspace credentials to access campaigns, mailbox settings, and automation controls.</p>
         </div>
         <form class="login-form" id="loginForm">
           <label>
@@ -30,11 +30,15 @@
             Workspace name
             <input id="workspaceNameInput" type="text" placeholder="Your company or campaign workspace" required />
           </label>
+          <label>
+            Password
+            <input id="loginPasswordInput" type="password" placeholder="Workspace password" autocomplete="current-password" required />
+          </label>
           <button class="primary-button full-width-button" type="submit">Continue to setup</button>
         </form>
       </section>
     </main>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="flow.js?v=20260626a"></script>
+    <script src="flow.js?v=20260626b"></script>
   </body>
 </html>

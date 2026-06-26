@@ -31,8 +31,12 @@ function setBusy(control, busy, label = "Working...") {
 }
 
 async function apiFetch(path, options) {
+  const session = getJson(sessionKey, {});
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
+    },
     ...options,
   });
   if (!response.ok) {
@@ -49,6 +53,10 @@ async function apiFetch(path, options) {
       : response.status >= 500
         ? "Server error. Please try again, or check the SMTP connection."
         : `Request failed (${response.status}).`;
+    if (response.status === 401 && currentPage() !== "login.html") {
+      localStorage.removeItem(sessionKey);
+      window.location.href = "login.html";
+    }
     throw new Error((body.issues || [apiMissing ? fallback : body.message || fallback]).join(" "));
   }
   return response.json();
@@ -87,6 +95,15 @@ function mergedEvents(apiEvents = []) {
   const byId = new Map();
   [...apiEvents, ...getJson(localEventsKey, [])].filter((event) => event?.id).forEach((event) => byId.set(event.id, event));
   return [...byId.values()].sort((a, b) => new Date(b.createdAt || b.scheduledAt || 0) - new Date(a.createdAt || a.scheduledAt || 0));
+}
+
+function updateStoredEvent(eventId, patch = {}) {
+  const events = getJson(localEventsKey, []);
+  setJson(
+    localEventsKey,
+    events.map((event) => (event.id === eventId ? { ...event, ...patch } : event)),
+  );
+  broadcastDashboardUpdate();
 }
 
 function fallbackEventsFromResults(result, campaign, typePrefix = "") {
@@ -153,7 +170,7 @@ async function getProgress() {
   const mailbox = getJson(mailboxKey, {});
   const localContacts = getJson(localContactsKey, []);
   return {
-    loggedIn: Boolean(getJson(sessionKey)),
+    loggedIn: Boolean(getJson(sessionKey)?.token),
     setup: Boolean(setup.offer && setup.audience && setup.proof),
     mailbox: Boolean(status.mailConfigured || mailbox.connected),
     audience: Number(status.contactCount || 0) > 0 || localContacts.length > 0,
@@ -307,14 +324,30 @@ function parseRecipients(value) {
   return [...new Set(String(value || "").split(/[\n,;]/).map((email) => email.trim().toLowerCase()).filter(Boolean))];
 }
 
-document.querySelector("#loginForm")?.addEventListener("submit", (event) => {
+document.querySelector("#loginForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  setJson(sessionKey, {
-    email: document.querySelector("#loginEmailInput").value.trim(),
-    workspace: document.querySelector("#workspaceNameInput").value.trim(),
-    signedInAt: new Date().toISOString(),
-  });
-  window.location.href = "index.html";
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type='submit']");
+  try {
+    setBusy(button, true, "Signing in...");
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: document.querySelector("#loginEmailInput").value.trim(),
+        workspace: document.querySelector("#workspaceNameInput").value.trim(),
+        password: document.querySelector("#loginPasswordInput").value,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message || "Login failed.");
+    setJson(sessionKey, { ...result.session, token: result.token });
+    window.location.href = "index.html";
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(button, false);
+  }
 });
 
 enforceJourneyOrder();
@@ -583,12 +616,41 @@ async function renderLaunchActivity() {
   });
   document.querySelectorAll("[data-push]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await apiFetch(`/api/followups/${button.dataset.push}/push`, { method: "POST", body: JSON.stringify({ mailbox: savedMailboxPayload() }) });
+      const event = mergedEvents().find((item) => item.id === button.dataset.push);
+      const result = await apiFetch(`/api/followups/${button.dataset.push}/push`, { method: "POST", body: JSON.stringify({ mailbox: savedMailboxPayload(), event }) });
+      updateStoredEvent(button.dataset.push, { type: result.event?.type || "followup-sent", pushedAt: new Date().toISOString(), subject: result.event?.subject || event?.subject });
+      if (result.event) mergeEvents([result.event]);
       showToast("Follow-up pushed.");
       renderLaunchActivity();
     });
   });
 }
+
+document.querySelector("#processFollowupsButton")?.addEventListener("click", async () => {
+  const button = document.querySelector("#processFollowupsButton");
+  const due = mergedEvents().filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date());
+  if (!due.length) return showToast("No due follow-ups right now.");
+
+  setBusy(button, true, "Running...");
+  let processed = 0;
+  let failed = 0;
+  try {
+    for (const event of due.slice(0, 25)) {
+      try {
+        const result = await apiFetch(`/api/followups/${event.id}/push`, { method: "POST", body: JSON.stringify({ mailbox: savedMailboxPayload(), event }) });
+        updateStoredEvent(event.id, { type: result.event?.type || "followup-sent", pushedAt: new Date().toISOString(), subject: result.event?.subject || event.subject });
+        if (result.event) mergeEvents([result.event]);
+        processed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    showToast(failed ? `${processed} follow-ups sent, ${failed} failed.` : `${processed} due follow-ups sent.`);
+    renderLaunchActivity();
+  } finally {
+    setBusy(button, false);
+  }
+});
 
 document.querySelector("#runAutomationButton")?.addEventListener("click", async () => {
   const button = document.querySelector("#runAutomationButton");

@@ -20,5 +20,8 @@
     { "src": "/(.*\\.html)", "dest": "/$1" },
     { "src": "/(.*\\.css)", "dest": "/$1" },
     { "src": "/(.*\\.js)", "dest": "/$1" }
+  ],
+  "crons": [
+    { "path": "/api/cron/followups", "schedule": "0 * * * *" }
   ]
 }

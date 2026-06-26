@@ -15,6 +15,7 @@ const localEventsKey = "emailAutomationEvents";
 const localContactsKey = "emailAutomationContacts";
 const localInboxKey = "emailAutomationInbox";
 const lastUpdateKey = "emailAutomationLastUpdate";
+const sessionKey = "emailAutomationSession";
 
 const colors = ["#1f6feb", "#0891b2", "#15803d", "#b45309", "#7c3aed", "#dc2626", "#64748b"];
 const sentTypes = new Set(["sent", "test-sent", "followup-sent"]);
@@ -28,7 +29,10 @@ function showToast(message) {
 }
 
 async function apiFetch(path) {
-  const response = await fetch(path);
+  const session = getJson(sessionKey, {});
+  const response = await fetch(path, {
+    headers: session?.token ? { Authorization: `Bearer ${session.token}` } : {},
+  });
   if (!response.ok) throw new Error("Dashboard data is unavailable.");
   return response.json();
 }

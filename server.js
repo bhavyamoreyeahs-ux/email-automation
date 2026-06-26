@@ -28,6 +28,9 @@ const defaultConfig = {
 };
 
 let config = { ...defaultConfig };
+const authSecret = process.env.AUTH_SECRET || "email-automation-local-auth-secret";
+const adminEmail = process.env.ADMIN_EMAIL || "admin@moreyeahs.com";
+const adminPassword = process.env.ADMIN_PASSWORD || "moreyeahs-admin";
 
 const emptyDb = {
   contacts: [],
@@ -88,6 +91,41 @@ function normalizeEmail(email) {
 
 function makeId(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
+}
+
+function base64urlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function signToken(payload) {
+  const encoded = base64urlJson(payload);
+  const signature = crypto.createHmac("sha256", authSecret).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function verifyToken(token = "") {
+  try {
+    const [encoded, signature] = String(token).split(".");
+    if (!encoded || !signature) return null;
+    const expected = crypto.createHmac("sha256", authSecret).update(encoded).digest("base64url");
+    if (Buffer.byteLength(signature) !== Buffer.byteLength(expected)) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    if (!payload.exp || payload.exp < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function requireAuth(request, response, next) {
+  const publicPaths = new Set(["/api/auth/login", "/api/auth/session"]);
+  if (publicPaths.has(request.path)) return next();
+  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const session = verifyToken(token);
+  if (!session) return response.status(401).json({ message: "Please login again to continue." });
+  request.session = session;
+  next();
 }
 
 function scoreContact(contact) {
@@ -290,6 +328,41 @@ async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
   return { mode: "sent", to, subject, messageId: response.messageId };
 }
 
+async function sendFollowupEvent(db, event, runtimeConfig) {
+  if (!event?.followupEmail || !event.contactSnapshot || !event.campaignSnapshot) {
+    throw new Error("This event does not contain a pushable follow-up draft.");
+  }
+
+  const token = crypto
+    .createHash("sha256")
+    .update(`${event.contactEmail}:${event.campaignName}:${event.id}:followup`)
+    .digest("hex");
+
+  const result = await sendOrSimulate({
+    contact: event.contactSnapshot,
+    email: event.followupEmail,
+    campaign: event.campaignSnapshot,
+    token,
+    runtimeConfig,
+  });
+
+  event.type = result.mode === "sent" ? "followup-sent" : "followup-simulation";
+  event.pushedAt = new Date().toISOString();
+  event.subject = result.subject;
+
+  const createdEvent = {
+    id: makeId("event"),
+    type: event.type,
+    contactEmail: event.contactEmail,
+    campaignName: event.campaignName,
+    subject: result.subject,
+    createdAt: event.pushedAt,
+  };
+  db.events.unshift(createdEvent);
+
+  return { result, event: createdEvent };
+}
+
 function formatInboxError(error) {
   const details = [error?.message, error?.responseText, error?.code].filter(Boolean).join(" - ");
   const message = details || "Unknown inbox sync error.";
@@ -363,6 +436,63 @@ async function fetchInboxMessages(runtimeConfig = config) {
 
   return messages.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
 }
+
+app.post("/api/auth/login", (request, response) => {
+  const email = normalizeEmail(request.body?.email);
+  const password = String(request.body?.password || "");
+  const workspace = String(request.body?.workspace || "MoreYeahs workspace").trim();
+
+  if (!email || !password) {
+    return response.status(400).json({ message: "Email and password are required." });
+  }
+
+  if (email !== normalizeEmail(adminEmail) || password !== adminPassword) {
+    return response.status(401).json({ message: "Invalid login credentials." });
+  }
+
+  const session = {
+    email,
+    workspace,
+    signedInAt: new Date().toISOString(),
+    exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  };
+
+  response.json({ token: signToken(session), session: { email, workspace, signedInAt: session.signedInAt } });
+});
+
+app.get("/api/auth/session", (request, response) => {
+  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const session = verifyToken(token);
+  if (!session) return response.status(401).json({ message: "Session expired." });
+  response.json({ session: { email: session.email, workspace: session.workspace, signedInAt: session.signedInAt } });
+});
+
+app.get("/api/cron/followups", async (request, response) => {
+  if (process.env.CRON_SECRET && request.query.secret !== process.env.CRON_SECRET) {
+    return response.status(401).json({ message: "Invalid cron secret." });
+  }
+
+  const db = await readDb();
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(db.mailConfig || {}));
+  const due = db.events
+    .filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date())
+    .slice(0, 25);
+  const processed = [];
+  const failures = [];
+
+  for (const event of due) {
+    try {
+      processed.push(await sendFollowupEvent(db, event, runtimeConfig));
+    } catch (error) {
+      failures.push({ id: event.id, contactEmail: event.contactEmail, message: formatSmtpError(error) });
+    }
+  }
+
+  await writeDb(db);
+  response.json({ processed: processed.length, failures, events: processed.map((item) => item.event) });
+});
+
+app.use("/api", requireAuth);
 
 app.get("/api/status", async (_request, response) => {
   const db = await readDb();
@@ -604,39 +734,33 @@ app.post("/api/automation/run", async (request, response) => {
 app.post("/api/followups/:id/push", async (request, response) => {
   const db = await readDb();
   const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
-  const event = db.events.find((item) => item.id === request.params.id);
+  const event = db.events.find((item) => item.id === request.params.id) || request.body.event;
 
   if (!event) return response.status(404).json({ message: "Follow-up event not found." });
-  if (!event.followupEmail || !event.contactSnapshot || !event.campaignSnapshot) {
-    return response.status(400).json({ message: "This event does not contain a pushable follow-up draft." });
+  const { result, event: createdEvent } = await sendFollowupEvent(db, event, runtimeConfig);
+  await writeDb(db);
+  response.json({ delivery: result, event: createdEvent });
+});
+
+app.post("/api/followups/process", async (request, response) => {
+  const db = await readDb();
+  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+  const due = db.events
+    .filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date())
+    .slice(0, Number(request.body.limit || 25));
+  const processed = [];
+  const failures = [];
+
+  for (const event of due) {
+    try {
+      processed.push(await sendFollowupEvent(db, event, runtimeConfig));
+    } catch (error) {
+      failures.push({ id: event.id, contactEmail: event.contactEmail, message: formatSmtpError(error) });
+    }
   }
 
-  const token = crypto
-    .createHash("sha256")
-    .update(`${event.contactEmail}:${event.campaignName}:${event.id}:manual-followup`)
-    .digest("hex");
-  const result = await sendOrSimulate({
-    contact: event.contactSnapshot,
-    email: event.followupEmail,
-    campaign: event.campaignSnapshot,
-    token,
-    runtimeConfig,
-  });
-
-  event.type = result.mode === "sent" ? "followup-sent" : "followup-simulation";
-  event.pushedAt = new Date().toISOString();
-  event.subject = result.subject;
-  db.events.unshift({
-    id: makeId("event"),
-    type: event.type,
-    contactEmail: event.contactEmail,
-    campaignName: event.campaignName,
-    subject: result.subject,
-    createdAt: event.pushedAt,
-  });
-
   await writeDb(db);
-  response.json({ delivery: result });
+  response.json({ processed: processed.length, failures, events: processed.map((item) => item.event) });
 });
 
 app.post("/api/test/send", async (request, response) => {

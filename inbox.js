@@ -5,6 +5,7 @@ const toast = document.querySelector('#toast');
 const syncInboxButton = document.querySelector('#syncInboxButton');
 const mailboxKey = 'emailAutomationMailbox';
 const localInboxKey = 'emailAutomationInbox';
+const sessionKey = 'emailAutomationSession';
 let selectedMessage = null;
 let messages = [];
 
@@ -31,8 +32,12 @@ function setBusy(control, busy, label = 'Working...') {
 }
 
 async function apiFetch(path, options) {
+  const session = getJson(sessionKey, {});
   const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
+    },
     ...options,
   });
   const data = await response.json().catch(() => ({}));
@@ -228,11 +233,14 @@ async function sendReply(message, mode) {
   setBusy(button, true, 'Sending...');
 
   try {
-    const response = await fetch(`/api/inbox/${message.id}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body, mode, mailbox: savedMailboxPayload(), message }),
-    });
+  const response = await fetch(`/api/inbox/${message.id}/reply`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getJson(sessionKey, {})?.token ? { Authorization: `Bearer ${getJson(sessionKey, {}).token}` } : {}),
+    },
+    body: JSON.stringify({ body, mode, mailbox: savedMailboxPayload(), message }),
+  });
 
     const result = await response.json();
     if (!response.ok) {
