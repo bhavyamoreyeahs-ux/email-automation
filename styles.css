@@ -655,6 +655,14 @@ h3 {
   padding: 22px;
 }
 
+.provider-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
 .campaign-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

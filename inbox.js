@@ -82,7 +82,7 @@ function renderInbox() {
   inboxCount.textContent = String(messages.length);
 
   if (!messages.length) {
-    inboxList.innerHTML = '<div class="empty-state"><strong>No replies yet</strong><span>Sync replies over IMAP, or add a reply manually if Microsoft blocks inbox access.</span></div>';
+    inboxList.innerHTML = '<div class="empty-state"><strong>No replies yet</strong><span>Sync replies with Microsoft Graph, or add a reply manually as backup.</span></div>';
     return;
   }
 
@@ -208,7 +208,7 @@ async function syncInbox() {
 
   syncInboxButton.disabled = true;
   setBusy(syncInboxButton, true, 'Syncing...');
-  if (inboxSyncStatus) inboxSyncStatus.textContent = 'Connecting to the mailbox over IMAP...';
+  if (inboxSyncStatus) inboxSyncStatus.textContent = 'Connecting to the mailbox...';
   try {
     const result = await apiFetch('/api/inbox/sync', {
       method: 'POST',
@@ -219,7 +219,7 @@ async function syncInbox() {
     if (inboxSyncStatus) inboxSyncStatus.textContent = `Last sync completed. ${result.synced} message${result.synced === 1 ? '' : 's'} returned.`;
     showToast(`Synced ${result.synced} inbox messages.`);
   } catch (error) {
-    if (inboxSyncStatus) inboxSyncStatus.textContent = `${error.message} You can add the reply manually below while IMAP is being enabled.`;
+    if (inboxSyncStatus) inboxSyncStatus.textContent = `${error.message} You can add the reply manually below while the mailbox connection is being fixed.`;
     showToast(error.message);
   } finally {
     setBusy(syncInboxButton, false);

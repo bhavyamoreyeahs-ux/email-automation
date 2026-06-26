@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MoreYeahs AI Inbox</title>
-    <link rel="stylesheet" href="styles.css?v=20260626c" />
+    <link rel="stylesheet" href="styles.css?v=20260626d" />
   </head>
   <body>
     <div class="app-shell">
@@ -34,7 +34,7 @@
         <div class="sidebar-panel">
           <span class="eyebrow">Replies</span>
           <strong id="inboxCount">0</strong>
-          <p>Sync inbound replies over IMAP, then send a reply draft or manual note.</p>
+          <p>Sync inbound replies with Microsoft Graph, then send a reply draft or manual note.</p>
         </div>
       </aside>
 
@@ -55,7 +55,7 @@
               </div>
               <button class="ghost-button compact" id="syncInboxButton" type="button">Sync replies</button>
             </div>
-            <p class="muted small" id="inboxSyncStatus">Sync uses IMAP. If Microsoft blocks IMAP, add the reply manually below and continue the workflow.</p>
+            <p class="muted small" id="inboxSyncStatus">Sync uses Microsoft Graph when connected. Manual reply capture stays available as a backup.</p>
             <div class="activity-log" id="inboxList"></div>
           </article>
 
@@ -91,6 +91,6 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="inbox.js?v=20260626c"></script>
+    <script src="inbox.js?v=20260626d"></script>
   </body>
 </html>

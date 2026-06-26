@@ -25,6 +25,10 @@ const defaultConfig = {
   smtpSecure: process.env.SMTP_SECURE === "true",
   smtpUser: process.env.SMTP_USER || "",
   smtpPass: process.env.SMTP_PASS || "",
+  graphTenantId: process.env.MICROSOFT_TENANT_ID || process.env.AZURE_TENANT_ID || "organizations",
+  graphClientId: process.env.MICROSOFT_CLIENT_ID || process.env.AZURE_CLIENT_ID || "",
+  graphClientSecret: process.env.MICROSOFT_CLIENT_SECRET || process.env.AZURE_CLIENT_SECRET || "",
+  graphRedirectUri: process.env.MICROSOFT_REDIRECT_URI || process.env.AZURE_REDIRECT_URI || "",
 };
 
 let config = { ...defaultConfig };
@@ -80,6 +84,15 @@ function mergeConfig(mailConfig = {}) {
     imapSecure: Boolean(mailConfig.imapSecure ?? config.imapSecure ?? defaultConfig.imapSecure ?? true),
     imapUser: mailConfig.imapUser || config.imapUser || defaultConfig.imapUser || "",
     imapPass: mailConfig.imapPass || config.imapPass || defaultConfig.imapPass || "",
+    graphTenantId: mailConfig.graphTenantId || config.graphTenantId || defaultConfig.graphTenantId,
+    graphClientId: mailConfig.graphClientId || config.graphClientId || defaultConfig.graphClientId,
+    graphClientSecret: mailConfig.graphClientSecret || config.graphClientSecret || defaultConfig.graphClientSecret,
+    graphRedirectUri: mailConfig.graphRedirectUri || config.graphRedirectUri || defaultConfig.graphRedirectUri,
+    graphConnected: Boolean(mailConfig.graphConnected ?? config.graphConnected ?? false),
+    graphEmail: mailConfig.graphEmail ?? config.graphEmail ?? "",
+    graphAccessToken: mailConfig.graphAccessToken ?? config.graphAccessToken ?? "",
+    graphRefreshToken: mailConfig.graphRefreshToken ?? config.graphRefreshToken ?? "",
+    graphExpiresAt: Number(mailConfig.graphExpiresAt ?? config.graphExpiresAt ?? 0),
   };
 }
 
@@ -250,6 +263,161 @@ function normalizeImapConfig(rawConfig = {}) {
   };
 }
 
+function graphRedirectUri(runtimeConfig = config) {
+  return runtimeConfig.graphRedirectUri || `${runtimeConfig.baseUrl}/api/microsoft/callback`;
+}
+
+function graphAuthority(runtimeConfig = config) {
+  return `https://login.microsoftonline.com/${runtimeConfig.graphTenantId || "organizations"}/oauth2/v2.0`;
+}
+
+function graphScopes() {
+  return ["offline_access", "User.Read", "Mail.Send", "Mail.Read"];
+}
+
+function hasGraphConnection(runtimeConfig = config) {
+  return Boolean(runtimeConfig.graphConnected && runtimeConfig.graphRefreshToken && runtimeConfig.graphEmail);
+}
+
+function hasGraphApp(runtimeConfig = config) {
+  return Boolean(runtimeConfig.graphClientId && runtimeConfig.graphClientSecret);
+}
+
+function providerMode(runtimeConfig = config) {
+  if (hasGraphConnection(runtimeConfig)) return "graph";
+  if (runtimeConfig.smtpHost) return "smtp";
+  return "simulation";
+}
+
+function graphState() {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const signature = crypto.createHmac("sha256", authSecret).update(nonce).digest("base64url");
+  return `${nonce}.${signature}`;
+}
+
+function verifyGraphState(state = "") {
+  const [nonce, signature] = String(state).split(".");
+  if (!nonce || !signature) return false;
+  const expected = crypto.createHmac("sha256", authSecret).update(nonce).digest("base64url");
+  return Buffer.byteLength(signature) === Buffer.byteLength(expected) && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
+
+async function requestGraphToken(params, runtimeConfig = config) {
+  const tokenResponse = await fetch(`${graphAuthority(runtimeConfig)}/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: runtimeConfig.graphClientId,
+      client_secret: runtimeConfig.graphClientSecret,
+      ...params,
+    }),
+  });
+  const payload = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok) {
+    throw new Error(payload.error_description || payload.error || "Microsoft token request failed.");
+  }
+  return payload;
+}
+
+async function refreshGraphTokens(db, runtimeConfig = mergeConfig(db.mailConfig || {})) {
+  if (!hasGraphApp(runtimeConfig) || !runtimeConfig.graphRefreshToken) {
+    throw new Error("Microsoft Graph is not connected yet.");
+  }
+
+  if (runtimeConfig.graphAccessToken && Number(runtimeConfig.graphExpiresAt || 0) > Date.now() + 90_000) {
+    return runtimeConfig;
+  }
+
+  const token = await requestGraphToken({
+    grant_type: "refresh_token",
+    refresh_token: runtimeConfig.graphRefreshToken,
+    redirect_uri: graphRedirectUri(runtimeConfig),
+    scope: graphScopes().join(" "),
+  }, runtimeConfig);
+
+  db.mailConfig = {
+    ...(db.mailConfig || {}),
+    graphConnected: true,
+    graphAccessToken: token.access_token,
+    graphRefreshToken: token.refresh_token || runtimeConfig.graphRefreshToken,
+    graphExpiresAt: Date.now() + Number(token.expires_in || 3600) * 1000,
+  };
+  await writeDb(db);
+  config = mergeConfig(db.mailConfig);
+  return mergeConfig(db.mailConfig);
+}
+
+async function graphFetch(pathname, options = {}, runtimeConfig = config) {
+  const response = await fetch(`https://graph.microsoft.com/v1.0${pathname}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${runtimeConfig.graphAccessToken}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || "Microsoft Graph request failed.");
+  }
+  return payload;
+}
+
+async function sendGraphMail({ to, subject, html, text, runtimeConfig = config }) {
+  await graphFetch(`/users/${encodeURIComponent(runtimeConfig.graphEmail)}/sendMail`, {
+    method: "POST",
+    body: JSON.stringify({
+      message: {
+        subject,
+        body: {
+          contentType: html ? "HTML" : "Text",
+          content: html || text,
+        },
+        toRecipients: [
+          {
+            emailAddress: { address: to },
+          },
+        ],
+        replyTo: runtimeConfig.replyTo
+          ? [{ emailAddress: { address: runtimeConfig.replyTo } }]
+          : undefined,
+      },
+      saveToSentItems: true,
+    }),
+  }, runtimeConfig);
+  return { mode: "sent", provider: "graph", to, subject, messageId: makeId("graph") };
+}
+
+async function fetchGraphInboxMessages(db) {
+  const runtimeConfig = await refreshGraphTokens(db);
+  const payload = await graphFetch(
+    `/users/${encodeURIComponent(runtimeConfig.graphEmail)}/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,receivedDateTime,body`,
+    { headers: { Prefer: 'outlook.body-content-type="text"' } },
+    runtimeConfig,
+  );
+  const selfEmail = normalizeEmail(runtimeConfig.graphEmail || runtimeConfig.fromEmail);
+  return (payload.value || [])
+    .map((message) => {
+      const from = message.from?.emailAddress || {};
+      const email = normalizeEmail(from.address);
+      const body = String(message.body?.content || message.bodyPreview || "").replace(/\s+/g, " ").trim();
+      return {
+        id: `graph_${message.id}`,
+        messageId: message.id,
+        name: from.name || "",
+        email,
+        subject: message.subject || "(No subject)",
+        preview: String(message.bodyPreview || body).slice(0, 180),
+        body: body || "(No readable message body)",
+        receivedAt: message.receivedDateTime || new Date().toISOString(),
+        source: "graph",
+      };
+    })
+    .filter((message) => message.email && message.email !== selfEmail)
+    .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+}
+
 function createTransport(runtimeConfig = config) {
   const smtpConfig = normalizeSmtpConfig(runtimeConfig);
   if (!smtpConfig.smtpHost) return null;
@@ -291,6 +459,10 @@ async function sendOrSimulate({ contact, email, campaign, token, runtimeConfig =
     .replaceAll("{{industry}}", contact.industry || "your industry");
   const html = renderEmailHtml({ contact, email, campaign, token, runtimeConfig });
 
+  if (hasGraphConnection(runtimeConfig) && runtimeConfig.graphAccessToken) {
+    return sendGraphMail({ to: contact.email, subject, html, runtimeConfig });
+  }
+
   if (!transport) {
     return {
       mode: "simulation",
@@ -313,6 +485,10 @@ async function sendOrSimulate({ contact, email, campaign, token, runtimeConfig =
 
 async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
   const transport = createTransport(runtimeConfig);
+  if (hasGraphConnection(runtimeConfig) && runtimeConfig.graphAccessToken) {
+    return sendGraphMail({ to, subject, text, runtimeConfig });
+  }
+
   if (!transport) {
     return {
       mode: "simulation",
@@ -331,6 +507,15 @@ async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
   });
 
   return { mode: "sent", to, subject, messageId: response.messageId };
+}
+
+async function runtimeConfigForRequest(db, override = {}, { normalizeSmtp = false, refreshGraph = false } = {}) {
+  const runtimeConfig = mergeConfig({ ...(db.mailConfig || {}), ...(override || {}) });
+  const normalized = normalizeSmtp ? normalizeSmtpConfig(runtimeConfig) : runtimeConfig;
+  if (refreshGraph && hasGraphConnection(normalized)) {
+    return refreshGraphTokens(db, normalized);
+  }
+  return normalized;
 }
 
 async function sendFollowupEvent(db, event, runtimeConfig) {
@@ -478,7 +663,7 @@ app.get("/api/cron/followups", async (request, response) => {
   }
 
   const db = await readDb();
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(db.mailConfig || {}));
+  const runtimeConfig = await runtimeConfigForRequest(db, {}, { normalizeSmtp: true, refreshGraph: true });
   const due = db.events
     .filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date())
     .slice(0, 25);
@@ -497,14 +682,112 @@ app.get("/api/cron/followups", async (request, response) => {
   response.json({ processed: processed.length, failures, events: processed.map((item) => item.event) });
 });
 
+app.get("/api/microsoft/callback", async (request, response) => {
+  const db = await readDb();
+  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const error = request.query.error_description || request.query.error;
+
+  if (error) {
+    return response.redirect(`/mailbox.html?graph=error&message=${encodeURIComponent(String(error))}`);
+  }
+
+  if (!verifyGraphState(request.query.state)) {
+    return response.redirect("/mailbox.html?graph=error&message=Invalid%20Microsoft%20OAuth%20state.");
+  }
+
+  if (!hasGraphApp(runtimeConfig)) {
+    return response.redirect("/mailbox.html?graph=error&message=Microsoft%20Graph%20environment%20variables%20are%20missing.");
+  }
+
+  try {
+    const token = await requestGraphToken({
+      grant_type: "authorization_code",
+      code: String(request.query.code || ""),
+      redirect_uri: graphRedirectUri(runtimeConfig),
+      scope: graphScopes().join(" "),
+    }, runtimeConfig);
+
+    const connectedConfig = mergeConfig({
+      ...(db.mailConfig || {}),
+      graphConnected: true,
+      graphAccessToken: token.access_token,
+      graphRefreshToken: token.refresh_token,
+      graphExpiresAt: Date.now() + Number(token.expires_in || 3600) * 1000,
+    });
+    const profile = await graphFetch("/me?$select=displayName,mail,userPrincipalName", {}, connectedConfig);
+    const graphEmail = normalizeEmail(profile.mail || profile.userPrincipalName);
+
+    db.mailConfig = {
+      ...(db.mailConfig || {}),
+      provider: "graph",
+      graphConnected: true,
+      graphEmail,
+      graphAccessToken: token.access_token,
+      graphRefreshToken: token.refresh_token,
+      graphExpiresAt: Date.now() + Number(token.expires_in || 3600) * 1000,
+      fromName: db.mailConfig?.fromName || profile.displayName || graphEmail,
+      fromEmail: db.mailConfig?.fromEmail || graphEmail,
+      replyTo: db.mailConfig?.replyTo || graphEmail,
+    };
+    config = mergeConfig(db.mailConfig);
+    await writeDb(db);
+    response.redirect(`/mailbox.html?graph=connected&email=${encodeURIComponent(graphEmail)}`);
+  } catch (callbackError) {
+    response.redirect(`/mailbox.html?graph=error&message=${encodeURIComponent(callbackError.message || "Microsoft connection failed.")}`);
+  }
+});
+
 app.use("/api", requireAuth);
+
+app.get("/api/microsoft/auth-url", async (_request, response) => {
+  const db = await readDb();
+  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  if (!hasGraphApp(runtimeConfig)) {
+    return response.status(400).json({
+      message: "Microsoft Graph is not configured yet. Add MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT_ID, and BASE_URL/MICROSOFT_REDIRECT_URI in Vercel.",
+    });
+  }
+
+  const params = new URLSearchParams({
+    client_id: runtimeConfig.graphClientId,
+    response_type: "code",
+    redirect_uri: graphRedirectUri(runtimeConfig),
+    response_mode: "query",
+    scope: graphScopes().join(" "),
+    state: graphState(),
+    prompt: "select_account consent",
+  });
+  response.json({
+    url: `${graphAuthority(runtimeConfig)}/authorize?${params}`,
+    redirectUri: graphRedirectUri(runtimeConfig),
+  });
+});
+
+app.post("/api/microsoft/disconnect", async (_request, response) => {
+  const db = await readDb();
+  db.mailConfig = {
+    ...(db.mailConfig || {}),
+    provider: db.mailConfig?.smtpHost ? "smtp" : "",
+    graphConnected: false,
+    graphEmail: "",
+    graphAccessToken: "",
+    graphRefreshToken: "",
+    graphExpiresAt: 0,
+  };
+  config = mergeConfig(db.mailConfig);
+  await writeDb(db);
+  response.json({ graphConfigured: hasGraphApp(config), graphConnected: false, graphEmail: "" });
+});
 
 app.get("/api/status", async (_request, response) => {
   const db = await readDb();
   const runtimeConfig = mergeConfig(db.mailConfig || {});
   response.json({
-    providerMode: runtimeConfig.smtpHost ? "smtp" : "simulation",
-    mailConfigured: Boolean(runtimeConfig.smtpHost && runtimeConfig.smtpUser),
+    providerMode: providerMode(runtimeConfig),
+    mailConfigured: Boolean(hasGraphConnection(runtimeConfig) || (runtimeConfig.smtpHost && runtimeConfig.smtpUser)),
+    graphConfigured: hasGraphApp(runtimeConfig),
+    graphConnected: hasGraphConnection(runtimeConfig),
+    graphEmail: runtimeConfig.graphEmail || "",
     contactCount: db.contacts.length,
     suppressedCount: db.suppressionList.length,
     eventCount: db.events.length,
@@ -533,7 +816,11 @@ app.get("/api/mail/config", async (_request, response) => {
     imapPort: runtimeConfig.imapPort || 993,
     imapSecure: runtimeConfig.imapSecure !== false,
     imapUser: runtimeConfig.imapUser || "",
-    connected: Boolean(runtimeConfig.smtpHost && runtimeConfig.smtpUser),
+    graphConfigured: hasGraphApp(runtimeConfig),
+    graphConnected: hasGraphConnection(runtimeConfig),
+    graphEmail: runtimeConfig.graphEmail || "",
+    providerMode: providerMode(runtimeConfig),
+    connected: Boolean(hasGraphConnection(runtimeConfig) || (runtimeConfig.smtpHost && runtimeConfig.smtpUser)),
   });
 });
 
@@ -572,11 +859,11 @@ app.post("/api/mail/connect", async (request, response) => {
     });
   }
 
-  db.mailConfig = nextConfig;
+  db.mailConfig = { ...(db.mailConfig || {}), ...nextConfig };
   config = mergeConfig(db.mailConfig);
   await writeDb(db);
   response.json({
-    connected: Boolean(db.mailConfig.smtpHost && db.mailConfig.smtpUser),
+    connected: Boolean(hasGraphConnection(config) || (db.mailConfig.smtpHost && db.mailConfig.smtpUser)),
     mailConfig: {
       smtpHost: db.mailConfig.smtpHost,
       smtpUser: db.mailConfig.smtpUser,
@@ -641,7 +928,7 @@ app.post("/api/campaigns", async (request, response) => {
 
 app.post("/api/automation/run", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
   const campaign = request.body.campaign;
   const issues = complianceIssues(campaign, runtimeConfig);
   if (issues.length) return response.status(400).json({ issues });
@@ -734,7 +1021,7 @@ app.post("/api/automation/run", async (request, response) => {
     return response.status(status).json({
       message: `${failures.length} opener email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
       partialFailure: results.length > 0,
-      mode: runtimeConfig.smtpHost ? "smtp" : "simulation",
+      mode: providerMode(runtimeConfig),
       processed: results.length,
       results,
       events: createdEvents,
@@ -742,12 +1029,12 @@ app.post("/api/automation/run", async (request, response) => {
       failures,
     });
   }
-  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents, persisted });
+  response.json({ mode: providerMode(runtimeConfig), processed: results.length, results, events: createdEvents, persisted });
 });
 
 app.post("/api/followups/:id/push", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
   const event = db.events.find((item) => item.id === request.params.id) || request.body.event;
 
   if (!event) return response.status(404).json({ message: "Follow-up event not found." });
@@ -758,7 +1045,7 @@ app.post("/api/followups/:id/push", async (request, response) => {
 
 app.post("/api/followups/process", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
   const due = db.events
     .filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date())
     .slice(0, Number(request.body.limit || 25));
@@ -779,7 +1066,7 @@ app.post("/api/followups/process", async (request, response) => {
 
 app.post("/api/test/send", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
   const campaign = request.body.campaign;
   const recipients = Array.isArray(request.body.recipients)
     ? [...new Set(request.body.recipients.map(normalizeEmail).filter(Boolean))]
@@ -860,7 +1147,7 @@ app.post("/api/test/send", async (request, response) => {
     return response.status(status).json({
       message: `${failures.length} test email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
       partialFailure: results.length > 0,
-      mode: runtimeConfig.smtpHost ? "smtp" : "simulation",
+      mode: providerMode(runtimeConfig),
       processed: results.length,
       results,
       events: createdEvents,
@@ -868,7 +1155,7 @@ app.post("/api/test/send", async (request, response) => {
       failures,
     });
   }
-  response.json({ mode: runtimeConfig.smtpHost ? "smtp" : "simulation", processed: results.length, results, events: createdEvents, persisted });
+  response.json({ mode: providerMode(runtimeConfig), processed: results.length, results, events: createdEvents, persisted });
 });
 
 app.get("/api/events", async (_request, response) => {
@@ -924,10 +1211,12 @@ app.get("/api/inbox", async (_request, response) => {
 
 app.post("/api/inbox/sync", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true });
 
   try {
-    const incoming = await fetchInboxMessages(runtimeConfig);
+    const incoming = hasGraphConnection(runtimeConfig)
+      ? await fetchGraphInboxMessages(db)
+      : await fetchInboxMessages(runtimeConfig);
     const byId = new Map((db.inboxMessages || []).map((message) => [message.id, message]));
     incoming.forEach((message) => byId.set(message.id, { ...byId.get(message.id), ...message }));
     db.inboxMessages = [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 200);
@@ -943,7 +1232,7 @@ app.post("/api/inbox/:id/reply", async (request, response) => {
   const message = db.inboxMessages?.find((item) => item.id === request.params.id) || request.body.message;
   if (!message) return response.status(404).json({ message: "Inbox message not found." });
 
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(request.body.mailbox || db.mailConfig || {}));
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
   const body = String(request.body?.body || "").trim();
   const mode = request.body?.mode === "manual" ? "manual" : "auto";
   const draft = body;

@@ -51,7 +51,7 @@ async function apiFetch(path, options) {
     const fallback = apiMissing
       ? "Backend API is not available on this deployment yet. Redeploy the latest version and try again."
       : response.status >= 500
-        ? "Server error. Please try again, or check the SMTP connection."
+        ? "Server error. Please try again, or check the mailbox connection."
         : `Request failed (${response.status}).`;
     if (response.status === 401 && currentPage() !== "login.html") {
       localStorage.removeItem(sessionKey);
@@ -393,8 +393,36 @@ if (mailboxForm) {
   const imapUserInput = document.querySelector("#imapUserInput");
   const imapPasswordInput = document.querySelector("#imapPasswordInput");
   const imapSecureInput = document.querySelector("#imapSecureInput");
+  const connectMicrosoftButton = document.querySelector("#connectMicrosoftButton");
+  const disconnectMicrosoftButton = document.querySelector("#disconnectMicrosoftButton");
+  const graphConnectionStatus = document.querySelector("#graphConnectionStatus");
   const savedMailbox = getJson(mailboxKey, {});
   const mailConnectionStatus = document.querySelector("#mailConnectionStatus");
+  const graphParams = new URLSearchParams(window.location.search);
+  if (graphParams.get("graph") === "connected") {
+    showToast(`Microsoft mailbox connected: ${graphParams.get("email") || "ready"}.`);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  } else if (graphParams.get("graph") === "error") {
+    showToast(graphParams.get("message") || "Microsoft connection failed.");
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  const renderGraphStatus = (mailbox = {}) => {
+    if (!graphConnectionStatus) return;
+    if (!mailbox.graphConfigured) {
+      graphConnectionStatus.textContent = "Microsoft Graph is not configured on the server yet. Add the Azure app credentials in Vercel environment variables.";
+      if (disconnectMicrosoftButton) disconnectMicrosoftButton.hidden = true;
+      return;
+    }
+    if (mailbox.graphConnected) {
+      graphConnectionStatus.textContent = `Microsoft Graph is connected as ${mailbox.graphEmail || mailbox.fromEmail || "this mailbox"}. Sending and inbox sync will use Graph.`;
+      if (disconnectMicrosoftButton) disconnectMicrosoftButton.hidden = false;
+      return;
+    }
+    graphConnectionStatus.textContent = "Microsoft Graph is configured but not connected yet.";
+    if (disconnectMicrosoftButton) disconnectMicrosoftButton.hidden = true;
+  };
+
   if (savedMailbox.connected && mailConnectionStatus) {
     mailConnectionStatus.textContent = `Mailbox is saved in this browser as ${savedMailbox.smtpUser || savedMailbox.fromEmail}.`;
   }
@@ -424,6 +452,7 @@ if (mailboxForm) {
     imapUserInput.value = mailbox.imapUser || mailbox.smtpUser || "";
     imapPasswordInput.value = savedMailbox.imapPass || "";
     imapSecureInput.checked = mailbox.imapSecure !== false;
+    renderGraphStatus(mailbox);
     syncSecureWithPort();
   };
 
@@ -473,6 +502,31 @@ if (mailboxForm) {
       showToast(error.message);
     } finally {
       setBusy(button, false);
+    }
+  });
+
+  connectMicrosoftButton?.addEventListener("click", async () => {
+    try {
+      setBusy(connectMicrosoftButton, true, "Opening Microsoft...");
+      const result = await apiFetch("/api/microsoft/auth-url");
+      window.location.href = result.url;
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      setBusy(connectMicrosoftButton, false);
+    }
+  });
+
+  disconnectMicrosoftButton?.addEventListener("click", async () => {
+    try {
+      setBusy(disconnectMicrosoftButton, true, "Disconnecting...");
+      const result = await apiFetch("/api/microsoft/disconnect", { method: "POST", body: JSON.stringify({}) });
+      renderGraphStatus(result);
+      showToast("Microsoft Graph disconnected.");
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      setBusy(disconnectMicrosoftButton, false);
     }
   });
 }
@@ -609,7 +663,7 @@ async function renderLaunchActivity() {
     const status = await apiFetch("/api/status").catch(() => ({}));
     const mailbox = getJson(mailboxKey, {});
     const connected = Boolean(status.mailConfigured || mailbox.connected);
-    providerMode.textContent = connected ? "SMTP mode" : "Simulation mode";
+    providerMode.textContent = status.providerMode === "graph" ? "Microsoft Graph mode" : connected ? "SMTP mode" : "Simulation mode";
     providerMode.classList.toggle("success", connected);
   }
   const events = mergedEvents(await apiFetch("/api/events").catch(() => []));

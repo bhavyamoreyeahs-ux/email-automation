@@ -8,7 +8,7 @@ An automated email marketing platform tailored for MoreYeahs. It includes:
 - CSV lead import
 - Contact scoring and segmentation
 - Automation journey visualization
-- Provider-ready SMTP sending with safe simulation mode
+- Microsoft Graph sending and reply sync, with SMTP fallback
 - Suppression list and unsubscribe handling
 - Compliance checks for sender, subject, address, and opt-out basics
 - Forecast metrics and chart
@@ -27,21 +27,38 @@ npm run automation
 
 Then visit `http://127.0.0.1:5174/`.
 
-## Configure Real Sending
+## Configure Microsoft Graph
 
-The app runs in safe simulation mode until SMTP settings are added.
+Microsoft Graph is the recommended provider for Microsoft 365 because it avoids SMTP/IMAP app-password failures.
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your SMTP provider settings, then restart:
+Create an app registration in Microsoft Entra ID, add a web redirect URI, then add these values to `.env` or Vercel:
+
+```bash
+BASE_URL=https://your-vercel-domain.vercel.app
+MICROSOFT_TENANT_ID=organizations
+MICROSOFT_CLIENT_ID=your-app-client-id
+MICROSOFT_CLIENT_SECRET=your-client-secret
+MICROSOFT_REDIRECT_URI=https://your-vercel-domain.vercel.app/api/microsoft/callback
+```
+
+Required Microsoft Graph delegated permissions:
+
+- `User.Read`
+- `Mail.Send`
+- `Mail.Read`
+- `offline_access`
+
+Then restart and connect the mailbox from the Mailbox page:
 
 ```bash
 npm run automation
 ```
 
-Use verified sender/domain settings for `moreyeahs.com` before enabling real sends.
+SMTP settings can still be used as a fallback if Graph is not connected.
 
 ## Frontend-Only Preview
 

@@ -1,12 +1,30 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Mailbox - Email Automation</title><link rel="stylesheet" href="styles.css?v=20260626c" /></head>
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Mailbox - Email Automation</title><link rel="stylesheet" href="styles.css?v=20260626d" /></head>
   <body>
     <div class="app-shell">
       <aside class="sidebar"><div class="brand"><div class="brand-mark">M</div><div><strong>MoreYeahs</strong><span>AI Email Automation</span></div></div><nav class="nav-list"><a href="index.html">Journey Home</a><details class="nav-dropdown" open><summary>Campaign Studio</summary><a href="setup.html">Setup</a><a class="active" href="mailbox.html">Mailbox</a><a href="audience.html">Audience</a><a href="campaign.html">Campaign</a><a href="launch.html">Launch</a></details><a href="dashboard.html">Dashboard</a><a href="inbox.html">Inbox</a></nav></aside>
       <main class="workspace narrow-workspace">
         <header class="topbar"><div><span class="eyebrow">Step 3</span><h1>Connect your sending mailbox.</h1></div><div class="topbar-actions"><a class="ghost-button" href="audience.html">Next: Audience</a></div></header>
+        <section class="panel provider-panel">
+          <div>
+            <span class="eyebrow">Recommended</span>
+            <h2>Microsoft Graph connection</h2>
+            <p class="muted">Use Microsoft OAuth for sending emails and syncing replies. This avoids IMAP and app-password failures in Microsoft 365.</p>
+          </div>
+          <div class="mail-actions">
+            <button class="primary-button" id="connectMicrosoftButton" type="button">Connect Microsoft mailbox</button>
+            <button class="ghost-button compact" id="disconnectMicrosoftButton" type="button">Disconnect</button>
+          </div>
+          <p class="muted small full-span" id="graphConnectionStatus">Microsoft Graph is not connected yet.</p>
+        </section>
         <section class="panel">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Fallback</span>
+              <h2>SMTP and legacy IMAP settings</h2>
+            </div>
+          </div>
           <form id="mailboxForm" class="campaign-form">
             <label>SMTP host<input id="smtpHostInput" type="text" placeholder="smtp.gmail.com" required /></label>
             <label>Port<input id="smtpPortInput" type="number" value="587" required /></label>
@@ -19,7 +37,7 @@
             <label class="checkbox-inline full-span"><input id="smtpSecureInput" type="checkbox" /> Use SSL/TLS only for port 465. Leave this off for Office 365 or Gmail on port 587.</label>
             <div class="form-divider full-span">
               <span class="eyebrow">Receiving replies</span>
-              <p class="muted small">SMTP sends email. IMAP reads replies for the Inbox. For Microsoft 365, IMAP must be enabled for this mailbox or reply sync will be rejected even when sending works.</p>
+              <p class="muted small">Keep this only as a fallback. Microsoft Graph is preferred for Microsoft 365 because it can send and read replies without SMTP/IMAP app-password issues.</p>
             </div>
             <label>IMAP host<input id="imapHostInput" type="text" placeholder="outlook.office365.com" /></label>
             <label>IMAP port<input id="imapPortInput" type="number" value="993" /></label>
@@ -33,6 +51,6 @@
       </main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="flow.js?v=20260626c"></script>
+    <script src="flow.js?v=20260626d"></script>
   </body>
 </html>
