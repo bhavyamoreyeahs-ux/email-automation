@@ -755,7 +755,7 @@ app.get("/api/microsoft/auth-url", async (_request, response) => {
     response_mode: "query",
     scope: graphScopes().join(" "),
     state: graphState(),
-    prompt: "select_account consent",
+    prompt: "consent",
   });
   response.json({
     url: `${graphAuthority(runtimeConfig)}/authorize?${params}`,
