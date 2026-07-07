@@ -995,10 +995,36 @@ app.post("/api/automation/run", async (request, response) => {
   if (issues.length) return response.status(400).json({ issues });
 
   const suppressed = new Set(db.suppressionList.map((item) => item.email));
-  const selectedContacts = db.contacts
-    .filter((contact) => !suppressed.has(contact.email))
-    .filter((contact) => !request.body.segment || contact.segment === request.body.segment)
-    .slice(0, Number(request.body.limit || 25));
+  const unsuppressedContacts = db.contacts.filter((contact) => !suppressed.has(contact.email));
+  const segment = request.body.segment || "";
+  const segmentContacts = unsuppressedContacts.filter((contact) => !segment || contact.segment === segment);
+  const limit = Number(request.body.limit || 25);
+  const selectedContacts = segmentContacts.slice(0, limit);
+
+  if (!db.contacts.length) {
+    return response.status(400).json({
+      reason: "no_contacts",
+      message: "No contacts are imported on the server yet. Go to Audience, upload/import your CSV or XLSX, then launch again.",
+    });
+  }
+  if (!unsuppressedContacts.length) {
+    return response.status(400).json({
+      reason: "all_suppressed",
+      message: "No eligible contacts are available. All imported contacts are suppressed or unsubscribed.",
+    });
+  }
+  if (!segmentContacts.length) {
+    return response.status(400).json({
+      reason: "segment_empty",
+      message: `No contacts match the selected segment${segment ? `: ${segment}` : ""}. Choose All active contacts or import contacts for this segment.`,
+    });
+  }
+  if (!selectedContacts.length) {
+    return response.status(400).json({
+      reason: "send_cap_zero",
+      message: "No contacts were selected because the send cap is 0. Increase the send cap and try again.",
+    });
+  }
 
   const results = [];
   const createdEvents = [];

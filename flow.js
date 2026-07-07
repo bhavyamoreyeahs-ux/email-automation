@@ -177,6 +177,11 @@ function rememberSendMode(result = {}) {
   }
 }
 
+function deliveryVerb(mode) {
+  if (mode === "smtp" || mode === "graph" || mode === "sent") return "Sent";
+  return "Simulated";
+}
+
 function syncMailboxFromStatus(status = {}) {
   if (!status.mailConfigured && !status.graphConnected) return getJson(mailboxKey, {});
   const mailbox = getJson(mailboxKey, {});
@@ -720,7 +725,7 @@ document.querySelector("#sendTestButton")?.addEventListener("click", async () =>
     const result = await apiFetch("/api/test/send", { method: "POST", body: JSON.stringify({ campaign, recipients, mailbox: savedMailboxPayload() }) });
     rememberSendMode(result);
     mergeEvents((result.events || []).length ? result.events : fallbackEventsFromResults(result, campaign, "test-"));
-    showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} test emails.`);
+    showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${deliveryVerb(result.mode)} ${result.processed} test emails.`);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -823,7 +828,11 @@ document.querySelector("#runAutomationButton")?.addEventListener("click", async 
       ? resultFallbackEvents
       : fallbackEventsFromContacts(selectedContacts.slice(0, Number(result.processed || 0)), campaign, result.mode);
     mergeEvents((result.events || []).length ? result.events : fallbackEvents);
-    showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${result.mode === "smtp" ? "Sent" : "Simulated"} ${result.processed} opener emails.`);
+    if (Number(result.processed || 0) === 0) {
+      showToast(result.message || "No opener emails were sent because no eligible contacts were selected.");
+    } else {
+      showToast(result.partialFailure ? `${result.processed} sent, ${result.failures.length} failed.` : `${deliveryVerb(result.mode)} ${result.processed} opener emails.`);
+    }
     renderLaunchActivity();
   } catch (error) {
     showToast(error.message);
