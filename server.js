@@ -136,10 +136,23 @@ function verifyToken(token = "") {
   }
 }
 
+function cookieValue(request, name) {
+  return String(request.headers.cookie || "")
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`))
+    ?.slice(name.length + 1) || "";
+}
+
+function sessionCookie(token) {
+  const secure = process.env.NODE_ENV === "production" || process.env.VERCEL ? " Secure;" : "";
+  return `emailAutomationSession=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=${30 * 24 * 60 * 60}`;
+}
+
 function requireAuth(request, response, next) {
   const publicPaths = new Set(["/api/auth/login", "/api/auth/session"]);
   if (publicPaths.has(request.path)) return next();
-  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "") || decodeURIComponent(cookieValue(request, "emailAutomationSession"));
   const session = verifyToken(token);
   if (!session) return response.status(401).json({ message: "Please login again to continue." });
   request.session = session;
@@ -644,17 +657,19 @@ app.post("/api/auth/login", (request, response) => {
     email,
     workspace,
     signedInAt: new Date().toISOString(),
-    exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
   };
 
-  response.json({ token: signToken(session), session: { email, workspace, signedInAt: session.signedInAt } });
+  const token = signToken(session);
+  response.setHeader("Set-Cookie", sessionCookie(token));
+  response.json({ token, session: { email, workspace, signedInAt: session.signedInAt } });
 });
 
 app.get("/api/auth/session", (request, response) => {
-  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "") || decodeURIComponent(cookieValue(request, "emailAutomationSession"));
   const session = verifyToken(token);
   if (!session) return response.status(401).json({ message: "Session expired." });
-  response.json({ session: { email: session.email, workspace: session.workspace, signedInAt: session.signedInAt } });
+  response.json({ token, session: { email: session.email, workspace: session.workspace, signedInAt: session.signedInAt } });
 });
 
 app.get("/api/cron/followups", async (request, response) => {

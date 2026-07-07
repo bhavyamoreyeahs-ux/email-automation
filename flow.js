@@ -5,6 +5,7 @@ const sessionKey = "emailAutomationSession";
 const localEventsKey = "emailAutomationEvents";
 const localContactsKey = "emailAutomationContacts";
 const mailboxKey = "emailAutomationMailbox";
+const returnToKey = "emailAutomationReturnTo";
 const orderedPages = ["setup.html", "mailbox.html", "audience.html", "campaign.html", "launch.html"];
 
 function showToast(message) {
@@ -55,6 +56,7 @@ async function apiFetch(path, options) {
         : `Request failed (${response.status}).`;
     if (response.status === 401 && currentPage() !== "login.html") {
       localStorage.removeItem(sessionKey);
+      localStorage.setItem(returnToKey, `${currentPage()}${window.location.search || ""}`);
       window.location.href = "login.html";
     }
     throw new Error((body.issues || [apiMissing ? fallback : body.message || fallback]).join(" "));
@@ -72,6 +74,20 @@ function getJson(key, fallback = null) {
 
 function setJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+async function hydrateSessionFromCookie() {
+  if (getJson(sessionKey)?.token) return getJson(sessionKey);
+  try {
+    const result = await apiFetch("/api/auth/session");
+    if (result?.token) {
+      setJson(sessionKey, { ...result.session, token: result.token });
+      return getJson(sessionKey);
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function broadcastDashboardUpdate() {
@@ -190,8 +206,10 @@ async function enforceJourneyOrder() {
   const page = currentPage();
   if (page === "login.html") return;
 
+  await hydrateSessionFromCookie();
   const progress = await getProgress();
   if (!progress.loggedIn) {
+    localStorage.setItem(returnToKey, `${page}${window.location.search || ""}`);
     window.location.href = "login.html";
     return;
   }
@@ -342,7 +360,9 @@ document.querySelector("#loginForm")?.addEventListener("submit", async (event) =
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.message || "Login failed.");
     setJson(sessionKey, { ...result.session, token: result.token });
-    window.location.href = "index.html";
+    const returnTo = localStorage.getItem(returnToKey);
+    localStorage.removeItem(returnToKey);
+    window.location.href = returnTo && returnTo !== "login.html" ? returnTo : "index.html";
   } catch (error) {
     showToast(error.message);
   } finally {
