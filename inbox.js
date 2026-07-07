@@ -59,8 +59,27 @@ function setJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function syncMailboxFromStatus(status = {}) {
+  if (!status.mailConfigured && !status.graphConnected) return getJson(mailboxKey, {});
+  const mailbox = getJson(mailboxKey, {});
+  const syncedMailbox = {
+    ...mailbox,
+    connected: true,
+    graphConnected: Boolean(status.graphConnected || mailbox.graphConnected),
+    graphConfigured: Boolean(status.graphConfigured || mailbox.graphConfigured),
+    graphEmail: status.graphEmail || mailbox.graphEmail || '',
+    fromName: status.config?.fromName || mailbox.fromName || '',
+    fromEmail: status.config?.fromEmail || status.graphEmail || mailbox.fromEmail || '',
+    replyTo: status.config?.replyTo || status.graphEmail || mailbox.replyTo || '',
+    connectedAt: mailbox.connectedAt || new Date().toISOString(),
+  };
+  setJson(mailboxKey, syncedMailbox);
+  return syncedMailbox;
+}
+
 function savedMailboxPayload() {
   const mailbox = getJson(mailboxKey, {});
+  if (mailbox.graphConnected) return null;
   if (!mailbox.connected || !mailbox.smtpHost || !mailbox.smtpUser || !mailbox.smtpPass) return null;
   return mailbox;
 }
@@ -184,6 +203,11 @@ function selectMessage(message) {
 }
 
 async function loadInbox() {
+  const status = await apiFetch('/api/status').catch(() => ({}));
+  const mailbox = syncMailboxFromStatus(status);
+  if (inboxSyncStatus && mailbox.graphConnected) {
+    inboxSyncStatus.textContent = `Microsoft Graph is connected${mailbox.graphEmail ? ` as ${mailbox.graphEmail}` : ''}. Click Sync replies to fetch inbound mail.`;
+  }
   const data = await apiFetch('/api/inbox').catch(() => []);
   saveInbox(data);
   renderInbox();
@@ -200,15 +224,18 @@ async function loadInbox() {
 
 async function syncInbox() {
   const mailbox = savedMailboxPayload();
-  if (!mailbox) {
-    showToast('Reconnect SMTP once so Inbox can use the saved mailbox credentials.');
-    if (inboxSyncStatus) inboxSyncStatus.textContent = 'Mailbox credentials are not saved in this browser yet. Reconnect Mailbox first.';
+  const status = await apiFetch('/api/status').catch(() => ({}));
+  const serverMailbox = syncMailboxFromStatus(status);
+  const canUseGraph = Boolean(status.graphConnected || serverMailbox.graphConnected);
+  if (!mailbox && !canUseGraph) {
+    showToast('Connect Microsoft Graph from Mailbox first.');
+    if (inboxSyncStatus) inboxSyncStatus.textContent = 'Microsoft Graph is not connected yet. Connect Mailbox first.';
     return;
   }
 
   syncInboxButton.disabled = true;
   setBusy(syncInboxButton, true, 'Syncing...');
-  if (inboxSyncStatus) inboxSyncStatus.textContent = 'Connecting to the mailbox...';
+  if (inboxSyncStatus) inboxSyncStatus.textContent = canUseGraph ? 'Syncing replies with Microsoft Graph...' : 'Connecting to the mailbox...';
   try {
     const result = await apiFetch('/api/inbox/sync', {
       method: 'POST',
