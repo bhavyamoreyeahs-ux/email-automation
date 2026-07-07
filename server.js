@@ -4,9 +4,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
-import nodemailer from "nodemailer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -20,11 +17,6 @@ const defaultConfig = {
   fromEmail: process.env.FROM_EMAIL || "",
   replyTo: process.env.REPLY_TO || "",
   address: process.env.COMPANY_ADDRESS || "",
-  smtpHost: process.env.SMTP_HOST || "",
-  smtpPort: Number(process.env.SMTP_PORT || 587),
-  smtpSecure: process.env.SMTP_SECURE === "true",
-  smtpUser: process.env.SMTP_USER || "",
-  smtpPass: process.env.SMTP_PASS || "",
   graphTenantId: process.env.MICROSOFT_TENANT_ID || process.env.AZURE_TENANT_ID || "consumers",
   graphClientId: process.env.MICROSOFT_CLIENT_ID || process.env.AZURE_CLIENT_ID || "",
   graphClientSecret: process.env.MICROSOFT_CLIENT_SECRET || process.env.AZURE_CLIENT_SECRET || "",
@@ -75,16 +67,6 @@ function mergeConfig(mailConfig = {}) {
     fromEmail: mailConfig.fromEmail || config.fromEmail || graphEmail || defaultConfig.fromEmail,
     replyTo: mailConfig.replyTo || config.replyTo || graphEmail || defaultConfig.replyTo,
     address: mailConfig.address || config.address || defaultConfig.address,
-    smtpHost: mailConfig.smtpHost || config.smtpHost || defaultConfig.smtpHost,
-    smtpPort: Number(mailConfig.smtpPort || config.smtpPort || defaultConfig.smtpPort || 587),
-    smtpSecure: Boolean(mailConfig.smtpSecure ?? config.smtpSecure ?? defaultConfig.smtpSecure),
-    smtpUser: mailConfig.smtpUser || config.smtpUser || defaultConfig.smtpUser,
-    smtpPass: mailConfig.smtpPass || config.smtpPass || defaultConfig.smtpPass,
-    imapHost: mailConfig.imapHost || config.imapHost || defaultConfig.imapHost || "",
-    imapPort: Number(mailConfig.imapPort || config.imapPort || defaultConfig.imapPort || 993),
-    imapSecure: Boolean(mailConfig.imapSecure ?? config.imapSecure ?? defaultConfig.imapSecure ?? true),
-    imapUser: mailConfig.imapUser || config.imapUser || defaultConfig.imapUser || "",
-    imapPass: mailConfig.imapPass || config.imapPass || defaultConfig.imapPass || "",
     graphTenantId: config.graphTenantId || defaultConfig.graphTenantId,
     graphClientId: config.graphClientId || defaultConfig.graphClientId,
     graphClientSecret: config.graphClientSecret || defaultConfig.graphClientSecret,
@@ -264,32 +246,6 @@ function renderEmailHtml({ contact, email, campaign, token, runtimeConfig = conf
   `;
 }
 
-function normalizeSmtpConfig(rawConfig = {}) {
-  const smtpPort = Number(rawConfig.smtpPort || 587);
-  return {
-    ...rawConfig,
-    smtpPort,
-    smtpSecure: smtpPort === 465 ? true : smtpPort === 587 ? false : Boolean(rawConfig.smtpSecure),
-  };
-}
-
-function normalizeImapConfig(rawConfig = {}) {
-  const smtpHost = String(rawConfig.smtpHost || "").toLowerCase();
-  const smtpUser = rawConfig.smtpUser || rawConfig.fromEmail || "";
-  let imapHost = rawConfig.imapHost || "";
-
-  if (!imapHost && /office365|outlook/.test(smtpHost)) imapHost = "outlook.office365.com";
-  if (!imapHost && /gmail/.test(smtpHost)) imapHost = "imap.gmail.com";
-
-  return {
-    imapHost,
-    imapPort: Number(rawConfig.imapPort || 993),
-    imapSecure: rawConfig.imapSecure ?? true,
-    imapUser: rawConfig.imapUser || smtpUser,
-    imapPass: rawConfig.imapPass || rawConfig.smtpPass || "",
-  };
-}
-
 function graphRedirectUri(runtimeConfig = config) {
   return runtimeConfig.graphRedirectUri || `${runtimeConfig.baseUrl}/api/microsoft/callback`;
 }
@@ -312,7 +268,6 @@ function hasGraphApp(runtimeConfig = config) {
 
 function providerMode(runtimeConfig = config) {
   if (hasGraphConnection(runtimeConfig)) return "graph";
-  if (runtimeConfig.smtpHost) return "smtp";
   return "simulation";
 }
 
@@ -445,42 +400,13 @@ async function fetchGraphInboxMessages(db) {
     .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
 }
 
-function createTransport(runtimeConfig = config) {
-  const smtpConfig = normalizeSmtpConfig(runtimeConfig);
-  if (!smtpConfig.smtpHost) return null;
-  return nodemailer.createTransport({
-    host: smtpConfig.smtpHost,
-    port: smtpConfig.smtpPort,
-    secure: smtpConfig.smtpSecure === true,
-    requireTLS: smtpConfig.smtpPort === 587,
-    connectionTimeout: 12000,
-    greetingTimeout: 12000,
-    socketTimeout: 12000,
-    auth: smtpConfig.smtpUser
-      ? {
-          user: smtpConfig.smtpUser,
-          pass: smtpConfig.smtpPass,
-        }
-      : undefined,
-  });
-}
-
-function formatSmtpError(error) {
-  const message = error?.message || "Unknown SMTP error.";
-  if (/wrong version|tls_validate_record_header/i.test(message)) {
-    return "SMTP connection failed: port 587 must use STARTTLS, not SSL/TLS. Use smtp.office365.com, port 587, with SSL/TLS off.";
-  }
-  if (/timeout|timed out|etimedout|greeting never received/i.test(message)) {
-    return "SMTP connection timed out. Check that SMTP AUTH is enabled for this Microsoft 365 mailbox, then try smtp.office365.com on port 587 with SSL/TLS off.";
-  }
-  if (/auth|authentication|login|535|5\.7\.3|5\.7\.57/i.test(message)) {
-    return `SMTP authentication failed. Check the mailbox password/app password and confirm SMTP AUTH is enabled. Details: ${message}`;
-  }
-  return `SMTP connection failed: ${message}`;
+function formatDeliveryError(error) {
+  const message = error?.message || "Unknown delivery error.";
+  if (/Microsoft Graph|Graph mailbox|Connect Microsoft Graph/i.test(message)) return message;
+  return `Microsoft Graph send failed: ${message}`;
 }
 
 async function sendOrSimulate({ contact, email, campaign, token, runtimeConfig = config }) {
-  const transport = createTransport(runtimeConfig);
   const subject = email.subject
     .replaceAll("{{company}}", contact.company || "your team")
     .replaceAll("{{industry}}", contact.industry || "your industry");
@@ -490,59 +416,23 @@ async function sendOrSimulate({ contact, email, campaign, token, runtimeConfig =
     return sendGraphMail({ to: contact.email, subject, html, runtimeConfig });
   }
 
-  if (!transport) {
-    return {
-      mode: "simulation",
-      to: contact.email,
-      subject,
-      preview: html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 180),
-    };
-  }
-
-  const response = await transport.sendMail({
-    from: `"${runtimeConfig.fromName}" <${runtimeConfig.fromEmail}>`,
-    to: contact.email,
-    replyTo: runtimeConfig.replyTo,
-    subject,
-    html,
-  });
-
-  return { mode: "sent", to: contact.email, subject, messageId: response.messageId };
+  throw new Error("Microsoft Graph mailbox is not connected. Connect Microsoft Graph from Mailbox before sending.");
 }
 
 async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
-  const transport = createTransport(runtimeConfig);
   if (hasGraphConnection(runtimeConfig) && runtimeConfig.graphAccessToken) {
     return sendGraphMail({ to, subject, text, runtimeConfig });
   }
 
-  if (!transport) {
-    return {
-      mode: "simulation",
-      to,
-      subject,
-      preview: text.replace(/\s+/g, " ").trim().slice(0, 180),
-    };
-  }
-
-  const response = await transport.sendMail({
-    from: `"${runtimeConfig.fromName}" <${runtimeConfig.fromEmail}>`,
-    to,
-    replyTo: runtimeConfig.replyTo,
-    subject,
-    text,
-  });
-
-  return { mode: "sent", to, subject, messageId: response.messageId };
+  throw new Error("Microsoft Graph mailbox is not connected. Connect Microsoft Graph from Mailbox before replying.");
 }
 
-async function runtimeConfigForRequest(db, override = {}, { normalizeSmtp = false, refreshGraph = false } = {}) {
+async function runtimeConfigForRequest(db, override = {}, { refreshGraph = false } = {}) {
   const runtimeConfig = mergeConfig({ ...(db.mailConfig || {}), ...(override || {}) });
-  const normalized = normalizeSmtp ? normalizeSmtpConfig(runtimeConfig) : runtimeConfig;
-  if (refreshGraph && hasGraphConnection(normalized)) {
-    return refreshGraphTokens(db, normalized);
+  if (refreshGraph && hasGraphConnection(runtimeConfig)) {
+    return refreshGraphTokens(db, runtimeConfig);
   }
-  return normalized;
+  return runtimeConfig;
 }
 
 async function sendFollowupEvent(db, event, runtimeConfig) {
@@ -584,74 +474,15 @@ function formatInboxError(error) {
   const details = [error?.message, error?.responseText, error?.code].filter(Boolean).join(" - ");
   const message = details || "Unknown inbox sync error.";
   if (/auth|authentication|login|invalid credentials|AUTHENTICATE/i.test(message)) {
-    return `Inbox authentication failed. SMTP sending can still work while Microsoft 365 blocks IMAP. Enable IMAP for this mailbox, confirm the IMAP username/password, or use the manual reply capture for now. Details: ${message}`;
+    return `Microsoft Graph inbox authentication failed. Reconnect Microsoft Graph from Mailbox and grant Mail.Read permission. Details: ${message}`;
   }
   if (/timeout|timed out|etimedout/i.test(message)) {
-    return "Inbox sync timed out. Check that IMAP is enabled for this mailbox and try again.";
+    return "Microsoft Graph inbox sync timed out. Reconnect the mailbox and try again.";
   }
   if (/command failed/i.test(message)) {
-    return "Inbox sync was rejected by the mail server. For Microsoft 365, SMTP sending can work while IMAP reply fetching is still disabled. Enable IMAP for this mailbox, or connect Microsoft Graph OAuth for production reply sync.";
+    return "Microsoft Graph rejected the inbox sync request. Reconnect the mailbox and confirm Mail.Read permission is granted.";
   }
   return `Inbox sync failed: ${message}`;
-}
-
-async function fetchInboxMessages(runtimeConfig = config) {
-  const imapConfig = normalizeImapConfig(runtimeConfig);
-  if (!imapConfig.imapHost || !imapConfig.imapUser || !imapConfig.imapPass) {
-    throw new Error("Inbox sync needs a saved mailbox with IMAP access. Reconnect the mailbox once, then sync again.");
-  }
-
-  const client = new ImapFlow({
-    host: imapConfig.imapHost,
-    port: imapConfig.imapPort,
-    secure: imapConfig.imapSecure !== false,
-    auth: {
-      user: imapConfig.imapUser,
-      pass: imapConfig.imapPass,
-    },
-    logger: false,
-    connectionTimeout: 12000,
-    greetingTimeout: 12000,
-    socketTimeout: 12000,
-  });
-
-  await client.connect();
-  const messages = [];
-  const selfEmail = normalizeEmail(runtimeConfig.fromEmail || runtimeConfig.smtpUser || imapConfig.imapUser);
-  const lock = await client.getMailboxLock("INBOX");
-
-  try {
-    const totalMessages = Number(client.mailbox.exists || 0);
-    if (!totalMessages) return [];
-    const firstMessage = Math.max(1, totalMessages - 49);
-
-    for await (const item of client.fetch(`${firstMessage}:*`, { uid: true, envelope: true, source: true, internalDate: true }, { uid: false })) {
-      const parsed = await simpleParser(item.source);
-      const from = parsed.from?.value?.[0] || {};
-      const email = normalizeEmail(from.address);
-      if (!email || email === selfEmail) continue;
-
-      const body = (parsed.text || parsed.html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-      const receivedAt = (parsed.date || item.internalDate || new Date()).toISOString();
-      messages.push({
-        id: crypto.createHash("sha256").update(String(parsed.messageId || `${item.uid}:${email}:${receivedAt}`)).digest("hex"),
-        uid: item.uid,
-        messageId: parsed.messageId || "",
-        name: from.name || "",
-        email,
-        subject: parsed.subject || item.envelope?.subject || "(No subject)",
-        preview: body.slice(0, 180),
-        body: body || "(No readable message body)",
-        receivedAt,
-        source: "imap",
-      });
-    }
-  } finally {
-    lock.release();
-    await client.logout().catch(() => {});
-  }
-
-  return messages.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
 }
 
 app.post("/api/auth/login", (request, response) => {
@@ -691,7 +522,7 @@ app.get("/api/cron/followups", async (request, response) => {
   }
 
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, {}, { normalizeSmtp: true, refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, {}, { refreshGraph: true });
   const due = db.events
     .filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date())
     .slice(0, 25);
@@ -795,7 +626,7 @@ app.post("/api/microsoft/disconnect", async (_request, response) => {
   const db = await readDb();
   db.mailConfig = {
     ...(db.mailConfig || {}),
-    provider: db.mailConfig?.smtpHost ? "smtp" : "",
+    provider: "",
     graphConnected: false,
     graphEmail: "",
     graphAccessToken: "",
@@ -812,7 +643,7 @@ app.get("/api/status", async (_request, response) => {
   const runtimeConfig = mergeConfig(db.mailConfig || {});
   response.json({
     providerMode: providerMode(runtimeConfig),
-    mailConfigured: Boolean(hasGraphConnection(runtimeConfig) || (runtimeConfig.smtpHost && runtimeConfig.smtpUser)),
+    mailConfigured: Boolean(hasGraphConnection(runtimeConfig)),
     graphConfigured: hasGraphApp(runtimeConfig),
     graphConnected: hasGraphConnection(runtimeConfig),
     graphEmail: runtimeConfig.graphEmail || "",
@@ -830,25 +661,17 @@ app.get("/api/status", async (_request, response) => {
 
 app.get("/api/mail/config", async (_request, response) => {
   const db = await readDb();
-  const runtimeConfig = normalizeSmtpConfig(mergeConfig(db.mailConfig || {}));
+  const runtimeConfig = mergeConfig(db.mailConfig || {});
   response.json({
-    smtpHost: runtimeConfig.smtpHost || "",
-    smtpPort: runtimeConfig.smtpPort || 587,
-    smtpSecure: Boolean(runtimeConfig.smtpSecure),
-    smtpUser: runtimeConfig.smtpUser || "",
     fromName: runtimeConfig.fromName || "",
     fromEmail: runtimeConfig.fromEmail || "",
     replyTo: runtimeConfig.replyTo || "",
     address: runtimeConfig.address || "",
-    imapHost: runtimeConfig.imapHost || "",
-    imapPort: runtimeConfig.imapPort || 993,
-    imapSecure: runtimeConfig.imapSecure !== false,
-    imapUser: runtimeConfig.imapUser || "",
     graphConfigured: hasGraphApp(runtimeConfig),
     graphConnected: hasGraphConnection(runtimeConfig),
     graphEmail: runtimeConfig.graphEmail || "",
     providerMode: providerMode(runtimeConfig),
-    connected: Boolean(hasGraphConnection(runtimeConfig) || (runtimeConfig.smtpHost && runtimeConfig.smtpUser)),
+    connected: Boolean(hasGraphConnection(runtimeConfig)),
   });
 });
 
@@ -857,9 +680,9 @@ app.post("/api/mail/profile", async (request, response) => {
   const incoming = request.body || {};
   const runtimeConfig = mergeConfig(db.mailConfig || {});
 
-  if (!hasGraphConnection(runtimeConfig) && !(runtimeConfig.smtpHost && runtimeConfig.smtpUser)) {
+  if (!hasGraphConnection(runtimeConfig)) {
     return response.status(400).json({
-      message: "Connect Microsoft Graph or SMTP before saving sender details.",
+      message: "Connect Microsoft Graph before saving sender details.",
     });
   }
 
@@ -877,7 +700,7 @@ app.post("/api/mail/profile", async (request, response) => {
   config = mergeConfig(db.mailConfig);
   await writeDb(db);
   response.json({
-    connected: Boolean(hasGraphConnection(config) || (config.smtpHost && config.smtpUser)),
+    connected: Boolean(hasGraphConnection(config)),
     providerMode: providerMode(config),
     graphConnected: hasGraphConnection(config),
     graphEmail: config.graphEmail || "",
@@ -885,51 +708,9 @@ app.post("/api/mail/profile", async (request, response) => {
   });
 });
 
-app.post("/api/mail/connect", async (request, response) => {
-  const db = await readDb();
-  const incoming = request.body || {};
-
-  if (!incoming.smtpHost || !incoming.smtpUser || !incoming.smtpPass) {
-    return response.status(400).json({
-      message: "SMTP host, username, and app password are required to connect real sending.",
-    });
-  }
-
-  const nextConfig = normalizeSmtpConfig(mergeConfig({
-    smtpHost: incoming.smtpHost || "",
-    smtpPort: Number(incoming.smtpPort || 587),
-    smtpSecure: Boolean(incoming.smtpSecure),
-    smtpUser: incoming.smtpUser || "",
-    smtpPass: incoming.smtpPass || "",
-    fromName: incoming.fromName || config.fromName,
-    fromEmail: incoming.fromEmail || incoming.smtpUser,
-    replyTo: incoming.replyTo || incoming.smtpUser,
-    address: incoming.address || "",
-    imapHost: incoming.imapHost || "",
-    imapPort: Number(incoming.imapPort || 993),
-    imapSecure: incoming.imapSecure !== false,
-    imapUser: incoming.imapUser || incoming.smtpUser || "",
-    imapPass: incoming.imapPass || incoming.smtpPass || "",
-  }));
-
-  try {
-    await createTransport(nextConfig).verify();
-  } catch (error) {
-    return response.status(400).json({
-      message: formatSmtpError(error),
-    });
-  }
-
-  db.mailConfig = { ...(db.mailConfig || {}), ...nextConfig };
-  config = mergeConfig(db.mailConfig);
-  await writeDb(db);
-  response.json({
-    connected: Boolean(hasGraphConnection(config) || (db.mailConfig.smtpHost && db.mailConfig.smtpUser)),
-    mailConfig: {
-      smtpHost: db.mailConfig.smtpHost,
-      smtpUser: db.mailConfig.smtpUser,
-      fromEmail: db.mailConfig.fromEmail,
-    },
+app.post("/api/mail/connect", async (_request, response) => {
+  response.status(410).json({
+    message: "SMTP and IMAP setup has been removed. Connect Microsoft Graph from the Mailbox page instead.",
   });
 });
 
@@ -989,7 +770,7 @@ app.post("/api/campaigns", async (request, response) => {
 
 app.post("/api/automation/run", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
   const campaign = request.body.campaign;
   const issues = complianceIssues(campaign, runtimeConfig);
   if (issues.length) return response.status(400).json({ issues });
@@ -1092,7 +873,7 @@ app.post("/api/automation/run", async (request, response) => {
         createdEvents.push(scheduledEvent);
       });
     } catch (error) {
-      failures.push({ email: contact.email, message: formatSmtpError(error) });
+      failures.push({ email: contact.email, message: formatDeliveryError(error) });
     }
   }
 
@@ -1121,7 +902,7 @@ app.post("/api/automation/run", async (request, response) => {
 
 app.post("/api/followups/:id/push", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
   const event = db.events.find((item) => item.id === request.params.id) || request.body.event;
 
   if (!event) return response.status(404).json({ message: "Follow-up event not found." });
@@ -1132,7 +913,7 @@ app.post("/api/followups/:id/push", async (request, response) => {
 
 app.post("/api/followups/process", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
   const due = db.events
     .filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date())
     .slice(0, Number(request.body.limit || 25));
@@ -1143,7 +924,7 @@ app.post("/api/followups/process", async (request, response) => {
     try {
       processed.push(await sendFollowupEvent(db, event, runtimeConfig));
     } catch (error) {
-      failures.push({ id: event.id, contactEmail: event.contactEmail, message: formatSmtpError(error) });
+      failures.push({ id: event.id, contactEmail: event.contactEmail, message: formatDeliveryError(error) });
     }
   }
 
@@ -1153,7 +934,7 @@ app.post("/api/followups/process", async (request, response) => {
 
 app.post("/api/test/send", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
   const campaign = request.body.campaign;
   const recipients = Array.isArray(request.body.recipients)
     ? [...new Set(request.body.recipients.map(normalizeEmail).filter(Boolean))]
@@ -1210,7 +991,7 @@ app.post("/api/test/send", async (request, response) => {
         },
       };
     } catch (error) {
-      return { failure: { email: contact.email, message: formatSmtpError(error) } };
+      return { failure: { email: contact.email, message: formatDeliveryError(error) } };
     }
   }));
 
@@ -1298,12 +1079,16 @@ app.get("/api/inbox", async (_request, response) => {
 
 app.post("/api/inbox/sync", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox);
+
+  if (!hasGraphConnection(runtimeConfig)) {
+    return response.status(400).json({
+      message: "Connect Microsoft Graph before syncing replies. IMAP reply sync has been removed.",
+    });
+  }
 
   try {
-    const incoming = hasGraphConnection(runtimeConfig)
-      ? await fetchGraphInboxMessages(db)
-      : await fetchInboxMessages(runtimeConfig);
+    const incoming = await fetchGraphInboxMessages(db);
     const byId = new Map((db.inboxMessages || []).map((message) => [message.id, message]));
     incoming.forEach((message) => byId.set(message.id, { ...byId.get(message.id), ...message }));
     db.inboxMessages = [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 200);
@@ -1319,7 +1104,7 @@ app.post("/api/inbox/:id/reply", async (request, response) => {
   const message = db.inboxMessages?.find((item) => item.id === request.params.id) || request.body.message;
   if (!message) return response.status(404).json({ message: "Inbox message not found." });
 
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { normalizeSmtp: true, refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
   const body = String(request.body?.body || "").trim();
   const mode = request.body?.mode === "manual" ? "manual" : "auto";
   const draft = body;
@@ -1372,7 +1157,7 @@ app.use((error, request, response, next) => {
 if (!process.env.VERCEL) {
   app.listen(port, "127.0.0.1", () => {
     console.log(`MoreYeahs email automation running at http://127.0.0.1:${port}`);
-    console.log(`Provider mode: ${process.env.SMTP_HOST ? "SMTP sending" : "safe simulation"}`);
+    console.log("Provider mode: Microsoft Graph mailbox");
   });
 }
 

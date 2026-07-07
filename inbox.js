@@ -78,10 +78,7 @@ function syncMailboxFromStatus(status = {}) {
 }
 
 function savedMailboxPayload() {
-  const mailbox = getJson(mailboxKey, {});
-  if (mailbox.graphConnected) return null;
-  if (!mailbox.connected || !mailbox.smtpHost || !mailbox.smtpUser || !mailbox.smtpPass) return null;
-  return mailbox;
+  return null;
 }
 
 function mergeMessages(primary = [], secondary = []) {
@@ -235,7 +232,7 @@ async function syncInbox() {
 
   syncInboxButton.disabled = true;
   setBusy(syncInboxButton, true, 'Syncing...');
-  if (inboxSyncStatus) inboxSyncStatus.textContent = canUseGraph ? 'Syncing replies with Microsoft Graph...' : 'Connecting to the mailbox...';
+  if (inboxSyncStatus) inboxSyncStatus.textContent = 'Syncing replies with Microsoft Graph...';
   try {
     const result = await apiFetch('/api/inbox/sync', {
       method: 'POST',

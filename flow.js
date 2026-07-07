@@ -128,8 +128,12 @@ function updateStoredEvent(eventId, patch = {}) {
   broadcastDashboardUpdate();
 }
 
+function isRealDeliveryMode(mode) {
+  return mode === "graph" || mode === "sent";
+}
+
 function fallbackEventsFromResults(result, campaign, typePrefix = "") {
-  const eventType = `${typePrefix}${result.mode === "smtp" ? "sent" : "simulation"}`;
+  const eventType = `${typePrefix}${isRealDeliveryMode(result.mode) ? "sent" : "simulation"}`;
   return (result.results || []).map((delivery, index) => ({
     id: `local_${eventType}_${Date.now()}_${index}_${String(delivery.to || "").replace(/[^a-z0-9]/gi, "_")}`,
     type: eventType,
@@ -151,11 +155,12 @@ async function getContacts() {
   return [...byEmail.values()];
 }
 
-function fallbackEventsFromContacts(contacts, campaign, mode = "smtp") {
+function fallbackEventsFromContacts(contacts, campaign, mode = "graph") {
   const subject = campaign?.emails?.[0]?.subject || "Campaign activity";
+  const isReal = isRealDeliveryMode(mode);
   return contacts.map((contact, index) => ({
-    id: `local_${mode === "smtp" ? "sent" : "simulation"}_${Date.now()}_${index}_${String(contact.email || "").replace(/[^a-z0-9]/gi, "_")}`,
-    type: mode === "smtp" ? "sent" : "simulation",
+    id: `local_${isReal ? "sent" : "simulation"}_${Date.now()}_${index}_${String(contact.email || "").replace(/[^a-z0-9]/gi, "_")}`,
+    type: isReal ? "sent" : "simulation",
     contactEmail: contact.email,
     campaignName: campaign?.offer || "Campaign",
     subject: subject
@@ -166,7 +171,7 @@ function fallbackEventsFromContacts(contacts, campaign, mode = "smtp") {
 }
 
 function rememberSendMode(result = {}) {
-  if ((result.mode === "smtp" || result.mode === "graph") && Number(result.processed || 0) > 0) {
+  if (isRealDeliveryMode(result.mode) && Number(result.processed || 0) > 0) {
     const mailbox = getJson(mailboxKey, {});
     setJson(mailboxKey, {
       ...mailbox,
@@ -178,7 +183,7 @@ function rememberSendMode(result = {}) {
 }
 
 function deliveryVerb(mode) {
-  if (mode === "smtp" || mode === "graph" || mode === "sent") return "Sent";
+  if (isRealDeliveryMode(mode)) return "Sent";
   return "Simulated";
 }
 
@@ -201,10 +206,7 @@ function syncMailboxFromStatus(status = {}) {
 }
 
 function savedMailboxPayload() {
-  const mailbox = getJson(mailboxKey, {});
-  if (mailbox.graphConnected) return null;
-  if (!mailbox.connected || !mailbox.smtpHost || !mailbox.smtpUser || !mailbox.smtpPass) return null;
-  return mailbox;
+  return null;
 }
 
 function currentPage() {
@@ -448,13 +450,6 @@ if (setupForm) {
 
 const mailboxForm = document.querySelector("#mailboxForm");
 if (mailboxForm) {
-  const smtpPortInput = document.querySelector("#smtpPortInput");
-  const smtpSecureInput = document.querySelector("#smtpSecureInput");
-  const imapHostInput = document.querySelector("#imapHostInput");
-  const imapPortInput = document.querySelector("#imapPortInput");
-  const imapUserInput = document.querySelector("#imapUserInput");
-  const imapPasswordInput = document.querySelector("#imapPasswordInput");
-  const imapSecureInput = document.querySelector("#imapSecureInput");
   const connectMicrosoftButton = document.querySelector("#connectMicrosoftButton");
   const disconnectMicrosoftButton = document.querySelector("#disconnectMicrosoftButton");
   const graphConnectionStatus = document.querySelector("#graphConnectionStatus");
@@ -486,44 +481,18 @@ if (mailboxForm) {
   };
 
   if (savedMailbox.connected && mailConnectionStatus) {
-    mailConnectionStatus.textContent = `Mailbox is saved in this browser as ${savedMailbox.smtpUser || savedMailbox.fromEmail}.`;
-  }
-  const syncSecureWithPort = () => {
-    const port = Number(smtpPortInput.value);
-    if (port === 587) smtpSecureInput.checked = false;
-    if (port === 465) smtpSecureInput.checked = true;
-  };
-  const inferImapHost = (smtpHost = "") => {
-    const host = smtpHost.toLowerCase();
-    if (host.includes("office365") || host.includes("outlook")) return "outlook.office365.com";
-    if (host.includes("gmail")) return "imap.gmail.com";
-    return "";
+    mailConnectionStatus.textContent = `Microsoft Graph mailbox is saved as ${savedMailbox.graphEmail || savedMailbox.fromEmail || "connected"}.`;
   };
   const applyMailboxValues = (mailbox = {}) => {
-    document.querySelector("#smtpHostInput").value = mailbox.smtpHost || "";
-    smtpPortInput.value = mailbox.smtpPort || 587;
-    document.querySelector("#smtpUserInput").value = mailbox.smtpUser || "";
-    document.querySelector("#smtpPasswordInput").value = savedMailbox.smtpPass || "";
     document.querySelector("#fromNameInput").value = mailbox.fromName || "";
-    document.querySelector("#fromEmailInput").value = mailbox.fromEmail || "";
-    document.querySelector("#replyToInput").value = mailbox.replyTo || "";
-    smtpSecureInput.checked = Boolean(mailbox.smtpSecure);
-    imapHostInput.value = mailbox.imapHost || inferImapHost(mailbox.smtpHost || "");
-    imapPortInput.value = mailbox.imapPort || 993;
-    imapUserInput.value = mailbox.imapUser || mailbox.smtpUser || "";
-    imapPasswordInput.value = savedMailbox.imapPass || "";
-    imapSecureInput.checked = mailbox.imapSecure !== false;
+    document.querySelector("#fromEmailInput").value = mailbox.fromEmail || mailbox.graphEmail || "";
+    document.querySelector("#replyToInput").value = mailbox.replyTo || mailbox.graphEmail || "";
     renderGraphStatus(mailbox);
-    const graphConnected = Boolean(mailbox.graphConnected);
-    mailboxForm.querySelectorAll("#smtpHostInput, #smtpUserInput, #smtpPasswordInput").forEach((input) => {
-      input.required = !graphConnected;
-    });
     const submitButton = mailboxForm.querySelector("button[type='submit']");
-    if (submitButton) submitButton.textContent = graphConnected ? "Save sender details" : "Verify and save mailbox";
-    if (mailConnectionStatus && graphConnected) {
+    if (submitButton) submitButton.disabled = !mailbox.graphConnected;
+    if (mailConnectionStatus && mailbox.graphConnected) {
       mailConnectionStatus.textContent = "Microsoft Graph is connected. Save sender details for launches.";
     }
-    syncSecureWithPort();
   };
 
   apiFetch("/api/mail/config").then((config) => {
@@ -536,45 +505,27 @@ if (mailboxForm) {
     applyMailboxValues(savedMailbox);
   });
 
-  smtpPortInput.addEventListener("input", syncSecureWithPort);
-  document.querySelector("#smtpHostInput").addEventListener("blur", () => {
-    if (!imapHostInput.value.trim()) imapHostInput.value = inferImapHost(document.querySelector("#smtpHostInput").value);
-  });
-
   mailboxForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = mailboxForm.querySelector("button[type='submit']");
     const graphConnected = Boolean(disconnectMicrosoftButton && !disconnectMicrosoftButton.hidden);
     try {
-      setBusy(button, true, graphConnected ? "Saving details..." : "Verifying mailbox...");
-      syncSecureWithPort();
+      if (!graphConnected) throw new Error("Connect Microsoft Graph before saving sender details.");
+      setBusy(button, true, "Saving details...");
       const nextMailbox = {
-        smtpHost: document.querySelector("#smtpHostInput").value.trim(),
-        smtpPort: smtpPortInput.value,
-        smtpUser: document.querySelector("#smtpUserInput").value.trim(),
-        smtpSecure: smtpSecureInput.checked,
         fromName: document.querySelector("#fromNameInput").value.trim(),
         fromEmail: document.querySelector("#fromEmailInput").value.trim(),
         replyTo: document.querySelector("#replyToInput").value.trim(),
-        smtpPass: document.querySelector("#smtpPasswordInput").value,
-        imapHost: imapHostInput.value.trim(),
-        imapPort: imapPortInput.value || 993,
-        imapSecure: imapSecureInput.checked,
-        imapUser: imapUserInput.value.trim() || document.querySelector("#smtpUserInput").value.trim(),
-        imapPass: imapPasswordInput.value || document.querySelector("#smtpPasswordInput").value,
       };
-      const endpoint = graphConnected ? "/api/mail/profile" : "/api/mail/connect";
-      await apiFetch(endpoint, {
+      await apiFetch("/api/mail/profile", {
         method: "POST",
         body: JSON.stringify(nextMailbox),
       });
       setJson(mailboxKey, { ...nextMailbox, connected: true, graphConnected, connectedAt: new Date().toISOString() });
       if (mailConnectionStatus) {
-        mailConnectionStatus.textContent = graphConnected
-          ? "Sender details saved for Microsoft Graph."
-          : `Mailbox is saved in this browser as ${nextMailbox.smtpUser}.`;
+        mailConnectionStatus.textContent = "Sender details saved for Microsoft Graph.";
       }
-      showToast(graphConnected ? "Sender details saved." : "Mailbox verified and saved.");
+      showToast("Sender details saved.");
       window.setTimeout(() => (window.location.href = "audience.html"), 700);
     } catch (error) {
       showToast(error.message);
@@ -740,10 +691,9 @@ async function renderLaunchActivity() {
   if (providerMode) {
     const status = await apiFetch("/api/status").catch(() => ({}));
     const mailbox = getJson(mailboxKey, {});
-    const connected = Boolean(status.mailConfigured || mailbox.connected);
     const graphConnected = Boolean(status.graphConnected || mailbox.graphConnected || status.providerMode === "graph");
-    providerMode.textContent = graphConnected ? "Microsoft Graph mode" : connected ? "SMTP mode" : "Simulation mode";
-    providerMode.classList.toggle("success", connected);
+    providerMode.textContent = graphConnected ? "Microsoft Graph mode" : "Graph not connected";
+    providerMode.classList.toggle("success", graphConnected);
   }
   const events = mergedEvents(await apiFetch("/api/events").catch(() => []));
   activityLog.innerHTML = "";
