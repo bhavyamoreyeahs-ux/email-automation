@@ -852,6 +852,44 @@ app.get("/api/mail/config", async (_request, response) => {
   });
 });
 
+app.post("/api/mail/profile", async (request, response) => {
+  const db = await readDb();
+  const incoming = request.body || {};
+  const runtimeConfig = mergeConfig(db.mailConfig || {});
+
+  if (!hasGraphConnection(runtimeConfig) && !(runtimeConfig.smtpHost && runtimeConfig.smtpUser)) {
+    return response.status(400).json({
+      message: "Connect Microsoft Graph or SMTP before saving sender details.",
+    });
+  }
+
+  const nextProfile = {
+    fromName: String(incoming.fromName || runtimeConfig.fromName || "").trim(),
+    fromEmail: String(incoming.fromEmail || runtimeConfig.fromEmail || runtimeConfig.graphEmail || "").trim(),
+    replyTo: String(incoming.replyTo || runtimeConfig.replyTo || runtimeConfig.graphEmail || "").trim(),
+    address: String(incoming.address || "").trim(),
+  };
+
+  if (!nextProfile.fromEmail.includes("@")) {
+    return response.status(400).json({ message: "Sender email is missing or invalid." });
+  }
+
+  if (!nextProfile.address) {
+    return response.status(400).json({ message: "Add a physical postal address before launching." });
+  }
+
+  db.mailConfig = { ...(db.mailConfig || {}), ...nextProfile };
+  config = mergeConfig(db.mailConfig);
+  await writeDb(db);
+  response.json({
+    connected: Boolean(hasGraphConnection(config) || (config.smtpHost && config.smtpUser)),
+    providerMode: providerMode(config),
+    graphConnected: hasGraphConnection(config),
+    graphEmail: config.graphEmail || "",
+    ...nextProfile,
+  });
+});
+
 app.post("/api/mail/connect", async (request, response) => {
   const db = await readDb();
   const incoming = request.body || {};

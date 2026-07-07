@@ -485,6 +485,16 @@ if (mailboxForm) {
     imapPasswordInput.value = savedMailbox.imapPass || "";
     imapSecureInput.checked = mailbox.imapSecure !== false;
     renderGraphStatus(mailbox);
+    const graphConnected = Boolean(mailbox.graphConnected);
+    mailboxForm.querySelectorAll("#smtpHostInput, #smtpUserInput, #smtpPasswordInput").forEach((input) => {
+      input.required = !graphConnected;
+    });
+    document.querySelector("#companyAddressInput").required = graphConnected;
+    const submitButton = mailboxForm.querySelector("button[type='submit']");
+    if (submitButton) submitButton.textContent = graphConnected ? "Save sender details" : "Verify and save mailbox";
+    if (mailConnectionStatus && graphConnected) {
+      mailConnectionStatus.textContent = "Microsoft Graph is connected. Save sender details and company address for launch compliance.";
+    }
     syncSecureWithPort();
   };
 
@@ -503,8 +513,9 @@ if (mailboxForm) {
   mailboxForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = mailboxForm.querySelector("button[type='submit']");
+    const graphConnected = Boolean(disconnectMicrosoftButton && !disconnectMicrosoftButton.hidden);
     try {
-      setBusy(button, true, "Verifying mailbox...");
+      setBusy(button, true, graphConnected ? "Saving details..." : "Verifying mailbox...");
       syncSecureWithPort();
       const nextMailbox = {
         smtpHost: document.querySelector("#smtpHostInput").value.trim(),
@@ -522,13 +533,18 @@ if (mailboxForm) {
         imapUser: imapUserInput.value.trim() || document.querySelector("#smtpUserInput").value.trim(),
         imapPass: imapPasswordInput.value || document.querySelector("#smtpPasswordInput").value,
       };
-      await apiFetch("/api/mail/connect", {
+      const endpoint = graphConnected ? "/api/mail/profile" : "/api/mail/connect";
+      await apiFetch(endpoint, {
         method: "POST",
         body: JSON.stringify(nextMailbox),
       });
-      setJson(mailboxKey, { ...nextMailbox, connected: true, connectedAt: new Date().toISOString() });
-      if (mailConnectionStatus) mailConnectionStatus.textContent = `Mailbox is saved in this browser as ${nextMailbox.smtpUser}.`;
-      showToast("Mailbox verified and saved.");
+      setJson(mailboxKey, { ...nextMailbox, connected: true, graphConnected, connectedAt: new Date().toISOString() });
+      if (mailConnectionStatus) {
+        mailConnectionStatus.textContent = graphConnected
+          ? "Sender details saved for Microsoft Graph."
+          : `Mailbox is saved in this browser as ${nextMailbox.smtpUser}.`;
+      }
+      showToast(graphConnected ? "Sender details saved." : "Mailbox verified and saved.");
       window.setTimeout(() => (window.location.href = "audience.html"), 700);
     } catch (error) {
       showToast(error.message);
