@@ -31,16 +31,22 @@ function setBusy(control, busy, label = "Working...") {
   }
 }
 
-async function apiFetch(path, options) {
+async function apiFetch(path, options = {}) {
+  const { retryingAfterAuthClear = false, skipAuthRedirect = false, ...fetchOptions } = options || {};
   const session = getJson(sessionKey, {});
   const response = await fetch(path, {
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
       ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
+      ...(fetchOptions.headers || {}),
     },
-    ...options,
   });
   if (!response.ok) {
+    if (response.status === 401 && session?.token && !retryingAfterAuthClear) {
+      localStorage.removeItem(sessionKey);
+      return apiFetch(path, { ...fetchOptions, skipAuthRedirect, retryingAfterAuthClear: true });
+    }
     const text = await response.text();
     let body = {};
     try {
@@ -54,7 +60,7 @@ async function apiFetch(path, options) {
       : response.status >= 500
         ? "Server error. Please try again, or check the mailbox connection."
         : `Request failed (${response.status}).`;
-    if (response.status === 401 && currentPage() !== "login.html") {
+    if (response.status === 401 && !skipAuthRedirect && currentPage() !== "login.html") {
       localStorage.removeItem(sessionKey);
       localStorage.setItem(returnToKey, `${currentPage()}${window.location.search || ""}`);
       window.location.href = "login.html";
@@ -78,7 +84,7 @@ function setJson(key, value) {
 
 async function hydrateSessionFromCookie() {
   try {
-    const result = await apiFetch("/api/auth/session");
+    const result = await apiFetch("/api/auth/session", { skipAuthRedirect: true });
     if (result?.token) {
       setJson(sessionKey, { ...result.session, token: result.token });
       return getJson(sessionKey);
