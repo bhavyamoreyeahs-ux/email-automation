@@ -183,16 +183,22 @@ function currentPage() {
 }
 
 async function getProgress() {
-  const status = await apiFetch("/api/status").catch(() => ({
-    mailConfigured: false,
-    contactCount: 0,
-  }));
+  let apiAuthenticated = false;
+  const status = await apiFetch("/api/status", { skipAuthRedirect: true })
+    .then((result) => {
+      apiAuthenticated = true;
+      return result;
+    })
+    .catch(() => ({
+      mailConfigured: false,
+      contactCount: 0,
+    }));
   const setup = getJson(setupKey, {});
   const campaign = getJson(campaignKey);
   const mailbox = getJson(mailboxKey, {});
   const localContacts = getJson(localContactsKey, []);
   return {
-    loggedIn: Boolean(getJson(sessionKey)?.token),
+    loggedIn: apiAuthenticated || Boolean(getJson(sessionKey)?.token),
     setup: Boolean(setup.offer && setup.audience && setup.proof),
     mailbox: Boolean(status.mailConfigured || mailbox.connected),
     audience: Number(status.contactCount || 0) > 0 || localContacts.length > 0,
