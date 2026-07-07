@@ -39,11 +39,15 @@ Create an app registration in Microsoft Entra ID, add a web redirect URI, then a
 
 ```bash
 BASE_URL=https://your-vercel-domain.vercel.app
-MICROSOFT_TENANT_ID=organizations
+MICROSOFT_TENANT_ID=consumers
 MICROSOFT_CLIENT_ID=your-app-client-id
 MICROSOFT_CLIENT_SECRET=your-client-secret
 MICROSOFT_REDIRECT_URI=https://your-vercel-domain.vercel.app/api/microsoft/callback
 ```
+
+For personal Outlook/Hotmail testing, set `MICROSOFT_TENANT_ID=consumers`.
+For both personal and work accounts, use `MICROSOFT_TENANT_ID=common`.
+For MoreYeahs-only production later, use the MoreYeahs tenant ID.
 
 Required Microsoft Graph delegated permissions:
 
