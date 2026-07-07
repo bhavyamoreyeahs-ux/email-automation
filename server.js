@@ -200,10 +200,25 @@ function isConverted(contact) {
   );
 }
 
+function senderEmailFor(runtimeConfig = config) {
+  return normalizeEmail(runtimeConfig.graphEmail || runtimeConfig.fromEmail || "");
+}
+
+function senderEmailIssue(runtimeConfig = config) {
+  const graphEmail = normalizeEmail(runtimeConfig.graphEmail || "");
+  const fromEmail = normalizeEmail(runtimeConfig.fromEmail || "");
+  if (graphEmail.includes("@")) return "";
+  if (fromEmail.includes("@")) return "";
+  if (runtimeConfig.graphConnected || runtimeConfig.graphRefreshToken) {
+    return "Sender email is missing because the Microsoft Graph connection did not save a mailbox address. Reconnect Microsoft Graph from Mailbox, then save sender details again.";
+  }
+  return "Sender email is missing because no Microsoft Graph mailbox is connected. Connect Microsoft Graph from Mailbox before launching.";
+}
+
 function complianceIssues(campaign, runtimeConfig = config) {
   const issues = [];
-  const senderEmail = runtimeConfig.fromEmail || runtimeConfig.graphEmail || "";
-  if (!senderEmail.includes("@")) issues.push("Sender email is missing or invalid.");
+  const senderIssue = senderEmailIssue(runtimeConfig);
+  if (senderIssue) issues.push(senderIssue);
   if (!campaign?.emails?.every((email) => email.subject && email.body)) {
     issues.push("Every email needs a subject and body.");
   }
@@ -361,8 +376,8 @@ async function sendGraphMail({ to, subject, html, text, runtimeConfig = config }
             emailAddress: { address: to },
           },
         ],
-        replyTo: runtimeConfig.replyTo
-          ? [{ emailAddress: { address: runtimeConfig.replyTo } }]
+        replyTo: normalizeEmail(runtimeConfig.replyTo).includes("@")
+          ? [{ emailAddress: { address: normalizeEmail(runtimeConfig.replyTo) } }]
           : undefined,
       },
       saveToSentItems: true,
@@ -430,7 +445,19 @@ async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
 async function runtimeConfigForRequest(db, override = {}, { refreshGraph = false } = {}) {
   const runtimeConfig = mergeConfig({ ...(db.mailConfig || {}), ...(override || {}) });
   if (refreshGraph && hasGraphConnection(runtimeConfig)) {
-    return refreshGraphTokens(db, runtimeConfig);
+    const refreshedConfig = await refreshGraphTokens(db, runtimeConfig);
+    const graphEmail = normalizeEmail(refreshedConfig.graphEmail || "");
+    if (graphEmail && (!normalizeEmail(refreshedConfig.fromEmail).includes("@") || !normalizeEmail(refreshedConfig.replyTo).includes("@"))) {
+      db.mailConfig = {
+        ...(db.mailConfig || {}),
+        fromEmail: normalizeEmail(refreshedConfig.fromEmail).includes("@") ? refreshedConfig.fromEmail : graphEmail,
+        replyTo: normalizeEmail(refreshedConfig.replyTo).includes("@") ? refreshedConfig.replyTo : graphEmail,
+      };
+      await writeDb(db);
+      config = mergeConfig(db.mailConfig);
+      return mergeConfig(db.mailConfig);
+    }
+    return refreshedConfig;
   }
   return runtimeConfig;
 }
@@ -641,6 +668,7 @@ app.post("/api/microsoft/disconnect", async (_request, response) => {
 app.get("/api/status", async (_request, response) => {
   const db = await readDb();
   const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const senderEmail = senderEmailFor(runtimeConfig);
   response.json({
     providerMode: providerMode(runtimeConfig),
     mailConfigured: Boolean(hasGraphConnection(runtimeConfig)),
@@ -652,8 +680,8 @@ app.get("/api/status", async (_request, response) => {
     eventCount: db.events.length,
     config: {
       fromName: runtimeConfig.fromName,
-      fromEmail: runtimeConfig.fromEmail,
-      replyTo: runtimeConfig.replyTo,
+      fromEmail: senderEmail,
+      replyTo: normalizeEmail(runtimeConfig.replyTo).includes("@") ? runtimeConfig.replyTo : senderEmail,
       address: runtimeConfig.address,
     },
   });
@@ -662,10 +690,11 @@ app.get("/api/status", async (_request, response) => {
 app.get("/api/mail/config", async (_request, response) => {
   const db = await readDb();
   const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const senderEmail = senderEmailFor(runtimeConfig);
   response.json({
     fromName: runtimeConfig.fromName || "",
-    fromEmail: runtimeConfig.fromEmail || "",
-    replyTo: runtimeConfig.replyTo || "",
+    fromEmail: senderEmail,
+    replyTo: normalizeEmail(runtimeConfig.replyTo).includes("@") ? runtimeConfig.replyTo : senderEmail,
     address: runtimeConfig.address || "",
     graphConfigured: hasGraphApp(runtimeConfig),
     graphConnected: hasGraphConnection(runtimeConfig),
@@ -688,12 +717,12 @@ app.post("/api/mail/profile", async (request, response) => {
 
   const nextProfile = {
     fromName: String(incoming.fromName || runtimeConfig.fromName || "").trim(),
-    fromEmail: String(incoming.fromEmail || runtimeConfig.fromEmail || runtimeConfig.graphEmail || "").trim(),
-    replyTo: String(incoming.replyTo || runtimeConfig.replyTo || runtimeConfig.graphEmail || "").trim(),
+    fromEmail: normalizeEmail(incoming.fromEmail || runtimeConfig.fromEmail || runtimeConfig.graphEmail || ""),
+    replyTo: normalizeEmail(incoming.replyTo || runtimeConfig.replyTo || runtimeConfig.graphEmail || ""),
   };
 
   if (!nextProfile.fromEmail.includes("@")) {
-    return response.status(400).json({ message: "Sender email is missing or invalid." });
+    return response.status(400).json({ message: senderEmailIssue(runtimeConfig) || "Sender email is missing or invalid." });
   }
 
   db.mailConfig = { ...(db.mailConfig || {}), ...nextProfile };
@@ -761,7 +790,7 @@ app.post("/api/campaigns", async (request, response) => {
     ...request.body,
     createdAt: new Date().toISOString(),
   };
-  const issues = complianceIssues(campaign);
+  const issues = complianceIssues(campaign, runtimeConfig);
   if (issues.length) return response.status(400).json({ issues });
   db.campaigns.unshift(campaign);
   await writeDb(db);
