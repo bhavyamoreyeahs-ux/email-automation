@@ -77,7 +77,6 @@ function setJson(key, value) {
 }
 
 async function hydrateSessionFromCookie() {
-  if (getJson(sessionKey)?.token) return getJson(sessionKey);
   try {
     const result = await apiFetch("/api/auth/session");
     if (result?.token) {
@@ -85,6 +84,7 @@ async function hydrateSessionFromCookie() {
       return getJson(sessionKey);
     }
   } catch {
+    localStorage.removeItem(sessionKey);
     return null;
   }
   return null;
@@ -215,7 +215,7 @@ async function enforceJourneyOrder() {
   }
 
   const requiredByPage = {
-    "mailbox.html": progress.setup,
+    "mailbox.html": true,
     "audience.html": progress.setup && progress.mailbox,
     "campaign.html": progress.setup && progress.mailbox && progress.audience,
     "launch.html": progress.setup && progress.mailbox && progress.audience && progress.campaign,

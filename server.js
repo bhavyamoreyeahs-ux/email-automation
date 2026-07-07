@@ -149,11 +149,25 @@ function sessionCookie(token) {
   return `emailAutomationSession=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=${30 * 24 * 60 * 60}`;
 }
 
+function requestTokens(request) {
+  return [
+    String(request.headers.authorization || "").replace(/^Bearer\s+/i, ""),
+    decodeURIComponent(cookieValue(request, "emailAutomationSession")),
+  ].filter(Boolean);
+}
+
+function verifyRequestSession(request) {
+  for (const token of requestTokens(request)) {
+    const session = verifyToken(token);
+    if (session) return { token, session };
+  }
+  return { token: "", session: null };
+}
+
 function requireAuth(request, response, next) {
   const publicPaths = new Set(["/api/auth/login", "/api/auth/session"]);
   if (publicPaths.has(request.path)) return next();
-  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "") || decodeURIComponent(cookieValue(request, "emailAutomationSession"));
-  const session = verifyToken(token);
+  const { session } = verifyRequestSession(request);
   if (!session) return response.status(401).json({ message: "Please login again to continue." });
   request.session = session;
   next();
@@ -666,8 +680,7 @@ app.post("/api/auth/login", (request, response) => {
 });
 
 app.get("/api/auth/session", (request, response) => {
-  const token = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "") || decodeURIComponent(cookieValue(request, "emailAutomationSession"));
-  const session = verifyToken(token);
+  const { token, session } = verifyRequestSession(request);
   if (!session) return response.status(401).json({ message: "Session expired." });
   response.json({ token, session: { email: session.email, workspace: session.workspace, signedInAt: session.signedInAt } });
 });
