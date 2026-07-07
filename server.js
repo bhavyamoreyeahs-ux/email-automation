@@ -65,14 +65,15 @@ async function writeDb(db) {
 }
 
 function mergeConfig(mailConfig = {}) {
+  const graphEmail = mailConfig.graphEmail ?? config.graphEmail ?? "";
   return {
     ...defaultConfig,
     ...config,
     ...mailConfig,
     baseUrl: mailConfig.baseUrl || config.baseUrl || defaultConfig.baseUrl,
     fromName: mailConfig.fromName || config.fromName || defaultConfig.fromName,
-    fromEmail: mailConfig.fromEmail || config.fromEmail || defaultConfig.fromEmail,
-    replyTo: mailConfig.replyTo || config.replyTo || defaultConfig.replyTo,
+    fromEmail: mailConfig.fromEmail || config.fromEmail || graphEmail || defaultConfig.fromEmail,
+    replyTo: mailConfig.replyTo || config.replyTo || graphEmail || defaultConfig.replyTo,
     address: mailConfig.address || config.address || defaultConfig.address,
     smtpHost: mailConfig.smtpHost || config.smtpHost || defaultConfig.smtpHost,
     smtpPort: Number(mailConfig.smtpPort || config.smtpPort || defaultConfig.smtpPort || 587),
@@ -89,7 +90,7 @@ function mergeConfig(mailConfig = {}) {
     graphClientSecret: config.graphClientSecret || defaultConfig.graphClientSecret,
     graphRedirectUri: config.graphRedirectUri || defaultConfig.graphRedirectUri,
     graphConnected: Boolean(mailConfig.graphConnected ?? config.graphConnected ?? false),
-    graphEmail: mailConfig.graphEmail ?? config.graphEmail ?? "",
+    graphEmail,
     graphAccessToken: mailConfig.graphAccessToken ?? config.graphAccessToken ?? "",
     graphRefreshToken: mailConfig.graphRefreshToken ?? config.graphRefreshToken ?? "",
     graphExpiresAt: Number(mailConfig.graphExpiresAt ?? config.graphExpiresAt ?? 0),
@@ -219,7 +220,8 @@ function isConverted(contact) {
 
 function complianceIssues(campaign, runtimeConfig = config) {
   const issues = [];
-  if (!runtimeConfig.fromEmail.includes("@")) issues.push("Sender email is missing or invalid.");
+  const senderEmail = runtimeConfig.fromEmail || runtimeConfig.graphEmail || "";
+  if (!senderEmail.includes("@")) issues.push("Sender email is missing or invalid.");
   if (!campaign?.emails?.every((email) => email.subject && email.body)) {
     issues.push("Every email needs a subject and body.");
   }

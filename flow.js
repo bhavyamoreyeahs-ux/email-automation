@@ -736,7 +736,8 @@ async function renderLaunchActivity() {
     const status = await apiFetch("/api/status").catch(() => ({}));
     const mailbox = getJson(mailboxKey, {});
     const connected = Boolean(status.mailConfigured || mailbox.connected);
-    providerMode.textContent = status.providerMode === "graph" ? "Microsoft Graph mode" : connected ? "SMTP mode" : "Simulation mode";
+    const graphConnected = Boolean(status.graphConnected || mailbox.graphConnected || status.providerMode === "graph");
+    providerMode.textContent = graphConnected ? "Microsoft Graph mode" : connected ? "SMTP mode" : "Simulation mode";
     providerMode.classList.toggle("success", connected);
   }
   const events = mergedEvents(await apiFetch("/api/events").catch(() => []));
