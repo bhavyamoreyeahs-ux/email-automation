@@ -417,8 +417,19 @@ async function fetchGraphInboxMessages(db) {
 
 function formatDeliveryError(error) {
   const message = error?.message || "Unknown delivery error.";
+  if (/account suspended|WASCL|Actual verdict is Suspend|ShowTierUpgrade/i.test(message)) {
+    return "Microsoft Graph send failed because this mailbox is suspended for outbound sending. Open the connected Outlook inbox, complete Microsoft account verification/security prompts, then reconnect Microsoft Graph and try again. Details: " + message;
+  }
+  if (/Forbidden|ErrorAccessDenied|Authorization_RequestDenied|insufficient privileges|permission/i.test(message)) {
+    return "Microsoft Graph send failed because this app or mailbox does not have permission to send. Reconnect Microsoft Graph and confirm Mail.Send permission is granted. Details: " + message;
+  }
   if (/Microsoft Graph|Graph mailbox|Connect Microsoft Graph/i.test(message)) return message;
   return `Microsoft Graph send failed: ${message}`;
+}
+
+function isBlockingDeliveryError(error) {
+  const message = error?.message || "";
+  return /account suspended|mailbox is suspended|WASCL|Actual verdict is Suspend|ShowTierUpgrade|Forbidden|ErrorAccessDenied|Authorization_RequestDenied|insufficient privileges|permission/i.test(message);
 }
 
 async function sendOrSimulate({ contact, email, campaign, token, runtimeConfig = config }) {
@@ -560,7 +571,8 @@ app.get("/api/cron/followups", async (request, response) => {
     try {
       processed.push(await sendFollowupEvent(db, event, runtimeConfig));
     } catch (error) {
-      failures.push({ id: event.id, contactEmail: event.contactEmail, message: formatSmtpError(error) });
+      failures.push({ id: event.id, contactEmail: event.contactEmail, message: formatDeliveryError(error) });
+      if (isBlockingDeliveryError(error)) break;
     }
   }
 
@@ -903,6 +915,7 @@ app.post("/api/automation/run", async (request, response) => {
       });
     } catch (error) {
       failures.push({ email: contact.email, message: formatDeliveryError(error) });
+      if (isBlockingDeliveryError(error)) break;
     }
   }
 
@@ -916,7 +929,9 @@ app.post("/api/automation/run", async (request, response) => {
   if (failures.length) {
     const status = results.length ? 200 : 400;
     return response.status(status).json({
-      message: `${failures.length} opener email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
+      message: isBlockingDeliveryError({ message: failures[0].message })
+        ? failures[0].message
+        : `${failures.length} opener email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
       partialFailure: results.length > 0,
       mode: providerMode(runtimeConfig),
       processed: results.length,
@@ -935,9 +950,13 @@ app.post("/api/followups/:id/push", async (request, response) => {
   const event = db.events.find((item) => item.id === request.params.id) || request.body.event;
 
   if (!event) return response.status(404).json({ message: "Follow-up event not found." });
-  const { result, event: createdEvent } = await sendFollowupEvent(db, event, runtimeConfig);
-  await writeDb(db);
-  response.json({ delivery: result, event: createdEvent });
+  try {
+    const { result, event: createdEvent } = await sendFollowupEvent(db, event, runtimeConfig);
+    await writeDb(db);
+    response.json({ delivery: result, event: createdEvent });
+  } catch (error) {
+    response.status(400).json({ message: formatDeliveryError(error) });
+  }
 });
 
 app.post("/api/followups/process", async (request, response) => {
@@ -954,6 +973,7 @@ app.post("/api/followups/process", async (request, response) => {
       processed.push(await sendFollowupEvent(db, event, runtimeConfig));
     } catch (error) {
       failures.push({ id: event.id, contactEmail: event.contactEmail, message: formatDeliveryError(error) });
+      if (isBlockingDeliveryError(error)) break;
     }
   }
 
@@ -997,7 +1017,8 @@ app.post("/api/test/send", async (request, response) => {
       };
     });
 
-  const attempts = await Promise.all(selectedContacts.map(async (contact) => {
+  const attempts = [];
+  for (const contact of selectedContacts) {
     const token = crypto.createHash("sha256").update(`${contact.email}:${campaign.id || campaign.offer}:test`).digest("hex");
     try {
       const result = await sendOrSimulate({
@@ -1008,7 +1029,7 @@ app.post("/api/test/send", async (request, response) => {
         runtimeConfig,
       });
 
-      return {
+      attempts.push({
         result,
         event: {
           id: makeId("event"),
@@ -1018,11 +1039,13 @@ app.post("/api/test/send", async (request, response) => {
           subject: result.subject,
           createdAt: new Date().toISOString(),
         },
-      };
+      });
     } catch (error) {
-      return { failure: { email: contact.email, message: formatDeliveryError(error) } };
+      attempts.push({ failure: { email: contact.email, message: formatDeliveryError(error) } });
+      if (isBlockingDeliveryError(error)) break;
+      continue;
     }
-  }));
+  }
 
   const results = attempts.map((attempt) => attempt.result).filter(Boolean);
   const failures = attempts.map((attempt) => attempt.failure).filter(Boolean);
@@ -1042,7 +1065,9 @@ app.post("/api/test/send", async (request, response) => {
   if (failures.length) {
     const status = results.length ? 200 : 400;
     return response.status(status).json({
-      message: `${failures.length} test email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
+      message: isBlockingDeliveryError({ message: failures[0].message })
+        ? failures[0].message
+        : `${failures.length} test email${failures.length === 1 ? "" : "s"} failed. ${failures[0].message}`,
       partialFailure: results.length > 0,
       mode: providerMode(runtimeConfig),
       processed: results.length,
