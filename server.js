@@ -220,7 +220,6 @@ function isConverted(contact) {
 function complianceIssues(campaign, runtimeConfig = config) {
   const issues = [];
   if (!runtimeConfig.fromEmail.includes("@")) issues.push("Sender email is missing or invalid.");
-  if (!runtimeConfig.address) issues.push("Physical postal address is missing.");
   if (!campaign?.emails?.every((email) => email.subject && email.body)) {
     issues.push("Every email needs a subject and body.");
   }
@@ -257,7 +256,6 @@ function renderEmailHtml({ contact, email, campaign, token, runtimeConfig = conf
       <hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0" />
       <p style="font-size:12px;color:#64748b">
         You are receiving this because you showed interest in MoreYeahs services or opted into business updates.
-        MoreYeahs, ${escapeHtml(runtimeConfig.address)}.
         <a href="${unsubscribeUrl}">Unsubscribe</a>
       </p>
     </div>
@@ -867,15 +865,10 @@ app.post("/api/mail/profile", async (request, response) => {
     fromName: String(incoming.fromName || runtimeConfig.fromName || "").trim(),
     fromEmail: String(incoming.fromEmail || runtimeConfig.fromEmail || runtimeConfig.graphEmail || "").trim(),
     replyTo: String(incoming.replyTo || runtimeConfig.replyTo || runtimeConfig.graphEmail || "").trim(),
-    address: String(incoming.address || "").trim(),
   };
 
   if (!nextProfile.fromEmail.includes("@")) {
     return response.status(400).json({ message: "Sender email is missing or invalid." });
-  }
-
-  if (!nextProfile.address) {
-    return response.status(400).json({ message: "Add a physical postal address before launching." });
   }
 
   db.mailConfig = { ...(db.mailConfig || {}), ...nextProfile };

@@ -477,7 +477,6 @@ if (mailboxForm) {
     document.querySelector("#fromNameInput").value = mailbox.fromName || "";
     document.querySelector("#fromEmailInput").value = mailbox.fromEmail || "";
     document.querySelector("#replyToInput").value = mailbox.replyTo || "";
-    document.querySelector("#companyAddressInput").value = mailbox.address || "";
     smtpSecureInput.checked = Boolean(mailbox.smtpSecure);
     imapHostInput.value = mailbox.imapHost || inferImapHost(mailbox.smtpHost || "");
     imapPortInput.value = mailbox.imapPort || 993;
@@ -489,11 +488,10 @@ if (mailboxForm) {
     mailboxForm.querySelectorAll("#smtpHostInput, #smtpUserInput, #smtpPasswordInput").forEach((input) => {
       input.required = !graphConnected;
     });
-    document.querySelector("#companyAddressInput").required = graphConnected;
     const submitButton = mailboxForm.querySelector("button[type='submit']");
     if (submitButton) submitButton.textContent = graphConnected ? "Save sender details" : "Verify and save mailbox";
     if (mailConnectionStatus && graphConnected) {
-      mailConnectionStatus.textContent = "Microsoft Graph is connected. Save sender details and company address for launch compliance.";
+      mailConnectionStatus.textContent = "Microsoft Graph is connected. Save sender details for launches.";
     }
     syncSecureWithPort();
   };
@@ -525,7 +523,6 @@ if (mailboxForm) {
         fromName: document.querySelector("#fromNameInput").value.trim(),
         fromEmail: document.querySelector("#fromEmailInput").value.trim(),
         replyTo: document.querySelector("#replyToInput").value.trim(),
-        address: document.querySelector("#companyAddressInput").value.trim(),
         smtpPass: document.querySelector("#smtpPasswordInput").value,
         imapHost: imapHostInput.value.trim(),
         imapPort: imapPortInput.value || 993,
