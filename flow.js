@@ -166,14 +166,38 @@ function fallbackEventsFromContacts(contacts, campaign, mode = "smtp") {
 }
 
 function rememberSendMode(result = {}) {
-  if (result.mode === "smtp" && Number(result.processed || 0) > 0) {
+  if ((result.mode === "smtp" || result.mode === "graph") && Number(result.processed || 0) > 0) {
     const mailbox = getJson(mailboxKey, {});
-    setJson(mailboxKey, { ...mailbox, connected: true, connectedAt: mailbox.connectedAt || new Date().toISOString() });
+    setJson(mailboxKey, {
+      ...mailbox,
+      connected: true,
+      graphConnected: result.mode === "graph" || Boolean(mailbox.graphConnected),
+      connectedAt: mailbox.connectedAt || new Date().toISOString(),
+    });
   }
+}
+
+function syncMailboxFromStatus(status = {}) {
+  if (!status.mailConfigured && !status.graphConnected) return getJson(mailboxKey, {});
+  const mailbox = getJson(mailboxKey, {});
+  const syncedMailbox = {
+    ...mailbox,
+    connected: true,
+    graphConnected: Boolean(status.graphConnected || mailbox.graphConnected),
+    graphConfigured: Boolean(status.graphConfigured || mailbox.graphConfigured),
+    graphEmail: status.graphEmail || mailbox.graphEmail || "",
+    fromName: status.config?.fromName || mailbox.fromName || "",
+    fromEmail: status.config?.fromEmail || status.graphEmail || mailbox.fromEmail || "",
+    replyTo: status.config?.replyTo || status.graphEmail || mailbox.replyTo || "",
+    connectedAt: mailbox.connectedAt || new Date().toISOString(),
+  };
+  setJson(mailboxKey, syncedMailbox);
+  return syncedMailbox;
 }
 
 function savedMailboxPayload() {
   const mailbox = getJson(mailboxKey, {});
+  if (mailbox.graphConnected) return null;
   if (!mailbox.connected || !mailbox.smtpHost || !mailbox.smtpUser || !mailbox.smtpPass) return null;
   return mailbox;
 }
@@ -196,11 +220,12 @@ async function getProgress() {
   const setup = getJson(setupKey, {});
   const campaign = getJson(campaignKey);
   const mailbox = getJson(mailboxKey, {});
+  const syncedMailbox = syncMailboxFromStatus(status);
   const localContacts = getJson(localContactsKey, []);
   return {
     loggedIn: apiAuthenticated || Boolean(getJson(sessionKey)?.token),
     setup: Boolean(setup.offer && setup.audience && setup.proof),
-    mailbox: Boolean(status.mailConfigured || mailbox.connected),
+    mailbox: Boolean(status.mailConfigured || syncedMailbox.connected || mailbox.connected),
     audience: Number(status.contactCount || 0) > 0 || localContacts.length > 0,
     campaign: Boolean(campaign?.emails?.length),
   };
@@ -498,6 +523,9 @@ if (mailboxForm) {
 
   apiFetch("/api/mail/config").then((config) => {
     const mergedConfig = { ...savedMailbox, ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "" && value !== undefined && value !== null)) };
+    if (mergedConfig.connected || mergedConfig.graphConnected) {
+      setJson(mailboxKey, { ...savedMailbox, ...mergedConfig, connected: true, connectedAt: savedMailbox.connectedAt || new Date().toISOString() });
+    }
     applyMailboxValues(mergedConfig);
   }).catch(() => {
     applyMailboxValues(savedMailbox);
