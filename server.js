@@ -386,14 +386,72 @@ async function sendGraphMail({ to, subject, html, text, runtimeConfig = config }
   return { mode: "sent", provider: "graph", to, subject, messageId: makeId("graph") };
 }
 
+const replyEligibleEventTypes = new Set(["sent", "test-sent", "followup-sent"]);
+
+function normalizeReplySubject(subject = "") {
+  return String(subject || "")
+    .toLowerCase()
+    .replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "")
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function buildReplyMatchIndex(db) {
+  const index = new Map();
+  (db.events || [])
+    .filter((event) => replyEligibleEventTypes.has(event.type) && normalizeEmail(event.contactEmail))
+    .forEach((event) => {
+      const email = normalizeEmail(event.contactEmail);
+      const entries = index.get(email) || [];
+      entries.push({
+        campaignName: event.campaignName || "Campaign",
+        createdAt: event.createdAt || event.pushedAt || new Date(0).toISOString(),
+        subject: event.subject || "",
+        normalizedSubject: normalizeReplySubject(event.subject || ""),
+      });
+      index.set(email, entries);
+    });
+
+  index.forEach((entries) => {
+    entries.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  });
+  return index;
+}
+
+function matchCampaignReply(message, replyIndex) {
+  const email = normalizeEmail(message.email);
+  const entries = replyIndex.get(email) || [];
+  if (!entries.length) return null;
+
+  const receivedAt = new Date(message.receivedAt || Date.now()).getTime();
+  const subject = String(message.subject || "");
+  const normalizedSubject = normalizeReplySubject(subject);
+  const body = normalizeReplySubject(`${message.preview || ""} ${message.body || ""}`);
+  const isReplyLike = /^\s*((re|fw|fwd)\s*:)/i.test(subject);
+
+  return entries.find((entry) => {
+    const sentAt = new Date(entry.createdAt || 0).getTime();
+    if (Number.isFinite(receivedAt) && Number.isFinite(sentAt) && receivedAt < sentAt - 5 * 60 * 1000) return false;
+    if (!entry.normalizedSubject || entry.normalizedSubject.length < 6) return isReplyLike;
+    const hasUsefulSubject = normalizedSubject.length >= 6;
+    return (
+      (hasUsefulSubject && normalizedSubject.includes(entry.normalizedSubject)) ||
+      (hasUsefulSubject && entry.normalizedSubject.includes(normalizedSubject)) ||
+      body.includes(entry.normalizedSubject)
+    );
+  }) || null;
+}
+
 async function fetchGraphInboxMessages(db) {
   const runtimeConfig = await refreshGraphTokens(db);
   const payload = await graphFetch(
-    `/users/${encodeURIComponent(runtimeConfig.graphEmail)}/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,receivedDateTime,body`,
+    `/users/${encodeURIComponent(runtimeConfig.graphEmail)}/mailFolders/inbox/messages?$top=100&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,receivedDateTime,body`,
     { headers: { Prefer: 'outlook.body-content-type="text"' } },
     runtimeConfig,
   );
   const selfEmail = normalizeEmail(runtimeConfig.graphEmail || runtimeConfig.fromEmail);
+  const replyIndex = buildReplyMatchIndex(db);
   return (payload.value || [])
     .map((message) => {
       const from = message.from?.emailAddress || {};
@@ -412,6 +470,18 @@ async function fetchGraphInboxMessages(db) {
       };
     })
     .filter((message) => message.email && message.email !== selfEmail)
+    .map((message) => {
+      const matched = matchCampaignReply(message, replyIndex);
+      return matched
+        ? {
+            ...message,
+            campaignName: matched.campaignName,
+            matchedSubject: matched.subject,
+            sentAt: matched.createdAt,
+          }
+        : null;
+    })
+    .filter(Boolean)
     .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
 }
 
@@ -1143,11 +1213,21 @@ app.post("/api/inbox/sync", async (request, response) => {
 
   try {
     const incoming = await fetchGraphInboxMessages(db);
-    const byId = new Map((db.inboxMessages || []).map((message) => [message.id, message]));
+    const replyIndex = buildReplyMatchIndex(db);
+    const previousMessages = db.inboxMessages || [];
+    const existingMessages = previousMessages.filter((message) => {
+      if (message.source !== "graph") return true;
+      return Boolean(matchCampaignReply(message, replyIndex));
+    });
+    const byId = new Map(existingMessages.map((message) => [message.id, message]));
     incoming.forEach((message) => byId.set(message.id, { ...byId.get(message.id), ...message }));
     db.inboxMessages = [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 200);
     await writeDb(db);
-    response.json({ synced: incoming.length, messages: db.inboxMessages });
+    response.json({
+      synced: incoming.length,
+      messages: db.inboxMessages,
+      filteredOut: Math.max(0, previousMessages.length - existingMessages.length),
+    });
   } catch (error) {
     response.status(400).json({ message: formatInboxError(error) });
   }

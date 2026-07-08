@@ -240,8 +240,10 @@ async function syncInbox() {
     });
     saveInbox(result.messages || []);
     renderInbox();
-    if (inboxSyncStatus) inboxSyncStatus.textContent = `Last sync completed. ${result.synced} message${result.synced === 1 ? '' : 's'} returned.`;
-    showToast(`Synced ${result.synced} inbox messages.`);
+    const cleanup = Number(result.filteredOut || 0);
+    const cleanupText = cleanup ? ` ${cleanup} unrelated inbox message${cleanup === 1 ? '' : 's'} removed.` : '';
+    if (inboxSyncStatus) inboxSyncStatus.textContent = `Last sync completed. ${result.synced} campaign repl${result.synced === 1 ? 'y' : 'ies'} returned.${cleanupText}`;
+    showToast(`Synced ${result.synced} campaign repl${result.synced === 1 ? 'y' : 'ies'}.`);
   } catch (error) {
     if (inboxSyncStatus) inboxSyncStatus.textContent = `${error.message} You can add the reply manually below while the mailbox connection is being fixed.`;
     showToast(error.message);
