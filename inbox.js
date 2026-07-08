@@ -87,8 +87,15 @@ function mergeMessages(primary = [], secondary = []) {
   return [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
 }
 
-function saveInbox(nextMessages) {
-  const merged = mergeMessages(nextMessages, getJson(localInboxKey, []));
+function manualLocalMessages() {
+  return getJson(localInboxKey, []).filter((message) => message?.source === 'manual');
+}
+
+function saveInbox(nextMessages, { replace = false, preserveManual = true } = {}) {
+  const localMessages = replace
+    ? (preserveManual ? manualLocalMessages() : [])
+    : getJson(localInboxKey, []);
+  const merged = mergeMessages(nextMessages, localMessages);
   messages = merged.slice(0, 200);
   setJson(localInboxKey, messages);
 }
@@ -206,13 +213,16 @@ async function loadInbox() {
     inboxSyncStatus.textContent = `Microsoft Graph is connected${mailbox.graphEmail ? ` as ${mailbox.graphEmail}` : ''}. Click Sync replies to fetch inbound mail.`;
   }
   const data = await apiFetch('/api/inbox').catch(() => []);
-  saveInbox(data);
+  saveInbox(data, { replace: true });
   renderInbox();
   if (selectedMessage) {
     const fresh = messages.find((item) => item.id === selectedMessage.id);
     if (fresh) {
       selectedMessage = fresh;
       renderReplyPanel(fresh);
+    } else {
+      selectedMessage = null;
+      renderReplyPanel(null);
     }
   } else if (messages[0]) {
     selectMessage(messages[0]);
@@ -238,8 +248,12 @@ async function syncInbox() {
       method: 'POST',
       body: JSON.stringify({ mailbox }),
     });
-    saveInbox(result.messages || []);
+    saveInbox(result.messages || [], { replace: true });
     renderInbox();
+    if (selectedMessage && !messages.some((item) => item.id === selectedMessage.id)) {
+      selectedMessage = null;
+      renderReplyPanel(null);
+    }
     const cleanup = Number(result.filteredOut || 0);
     const cleanupText = cleanup ? ` ${cleanup} unrelated inbox message${cleanup === 1 ? '' : 's'} removed.` : '';
     if (inboxSyncStatus) inboxSyncStatus.textContent = `Last sync completed. ${result.synced} campaign repl${result.synced === 1 ? 'y' : 'ies'} returned.${cleanupText}`;
