@@ -7,6 +7,7 @@ const inboxSyncStatus = document.querySelector('#inboxSyncStatus');
 const manualReplyForm = document.querySelector('#manualReplyForm');
 const mailboxKey = 'emailAutomationMailbox';
 const localInboxKey = 'emailAutomationInbox';
+const localEventsKey = 'emailAutomationEvents';
 const sessionKey = 'emailAutomationSession';
 let selectedMessage = null;
 let messages = [];
@@ -87,8 +88,16 @@ function mergeMessages(primary = [], secondary = []) {
   return [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
 }
 
+function isCampaignOrManualMessage(message = {}) {
+  return message.source === 'manual' || Boolean(message.campaignName && (message.matchedSubject || message.sentAt));
+}
+
 function manualLocalMessages() {
   return getJson(localInboxKey, []).filter((message) => message?.source === 'manual');
+}
+
+function campaignLocalMessages() {
+  return getJson(localInboxKey, []).filter(isCampaignOrManualMessage);
 }
 
 function saveInbox(nextMessages, { replace = false, preserveManual = true } = {}) {
@@ -98,6 +107,20 @@ function saveInbox(nextMessages, { replace = false, preserveManual = true } = {}
   const merged = mergeMessages(nextMessages, localMessages);
   messages = merged.slice(0, 200);
   setJson(localInboxKey, messages);
+}
+
+function replyHintsPayload() {
+  const replyEligibleTypes = new Set(['sent', 'test-sent', 'followup-sent']);
+  return getJson(localEventsKey, [])
+    .filter((event) => replyEligibleTypes.has(event?.type) && event.contactEmail && event.subject)
+    .map((event) => ({
+      type: event.type,
+      contactEmail: event.contactEmail,
+      campaignName: event.campaignName || 'Campaign',
+      subject: event.subject,
+      createdAt: event.createdAt || event.pushedAt || new Date().toISOString(),
+    }))
+    .slice(0, 300);
 }
 
 function renderInbox() {
@@ -213,7 +236,7 @@ async function loadInbox() {
     inboxSyncStatus.textContent = `Microsoft Graph is connected${mailbox.graphEmail ? ` as ${mailbox.graphEmail}` : ''}. Click Sync replies to fetch inbound mail.`;
   }
   const data = await apiFetch('/api/inbox').catch(() => []);
-  saveInbox(data, { replace: true });
+  saveInbox((Array.isArray(data) ? data : []).filter(isCampaignOrManualMessage), { replace: true });
   renderInbox();
   if (selectedMessage) {
     const fresh = messages.find((item) => item.id === selectedMessage.id);
@@ -246,9 +269,9 @@ async function syncInbox() {
   try {
     const result = await apiFetch('/api/inbox/sync', {
       method: 'POST',
-      body: JSON.stringify({ mailbox }),
+      body: JSON.stringify({ mailbox, replyHints: replyHintsPayload() }),
     });
-    saveInbox(result.messages || [], { replace: true });
+    saveInbox((result.messages || []).filter(isCampaignOrManualMessage), { replace: true });
     renderInbox();
     if (selectedMessage && !messages.some((item) => item.id === selectedMessage.id)) {
       selectedMessage = null;
@@ -336,6 +359,6 @@ async function sendReply(message, mode) {
 
 syncInboxButton?.addEventListener('click', syncInbox);
 manualReplyForm?.addEventListener('submit', addManualReply);
-saveInbox(getJson(localInboxKey, []));
+saveInbox(campaignLocalMessages(), { replace: true, preserveManual: false });
 renderInbox();
 loadInbox();

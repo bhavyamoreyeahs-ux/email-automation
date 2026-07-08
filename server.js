@@ -439,9 +439,21 @@ function normalizeReplySubject(subject = "") {
     .trim();
 }
 
-function buildReplyMatchIndex(db) {
+function normalizeReplyHints(hints = []) {
+  return (Array.isArray(hints) ? hints : [])
+    .filter((event) => replyEligibleEventTypes.has(event?.type) && normalizeEmail(event.contactEmail))
+    .map((event) => ({
+      type: event.type,
+      contactEmail: normalizeEmail(event.contactEmail),
+      campaignName: event.campaignName || "Campaign",
+      createdAt: event.createdAt || event.pushedAt || new Date(0).toISOString(),
+      subject: event.subject || "",
+    }));
+}
+
+function buildReplyMatchIndex(db, replyHints = []) {
   const index = new Map();
-  (db.events || [])
+  [...(db.events || []), ...normalizeReplyHints(replyHints)]
     .filter((event) => replyEligibleEventTypes.has(event.type) && normalizeEmail(event.contactEmail))
     .forEach((event) => {
       const email = normalizeEmail(event.contactEmail);
@@ -485,7 +497,7 @@ function matchCampaignReply(message, replyIndex) {
   }) || null;
 }
 
-async function fetchGraphInboxMessages(db, runtimeConfig = mergeConfig(db.mailConfig || {}), response = null) {
+async function fetchGraphInboxMessages(db, runtimeConfig = mergeConfig(db.mailConfig || {}), response = null, replyHints = []) {
   runtimeConfig = await refreshGraphTokens(db, runtimeConfig, response);
   const payload = await graphFetch(
     `/users/${encodeURIComponent(runtimeConfig.graphEmail)}/mailFolders/inbox/messages?$top=100&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,receivedDateTime,body`,
@@ -493,7 +505,7 @@ async function fetchGraphInboxMessages(db, runtimeConfig = mergeConfig(db.mailCo
     runtimeConfig,
   );
   const selfEmail = normalizeEmail(runtimeConfig.graphEmail || runtimeConfig.fromEmail);
-  const replyIndex = buildReplyMatchIndex(db);
+  const replyIndex = buildReplyMatchIndex(db, replyHints);
   return (payload.value || [])
     .map((message) => {
       const from = message.from?.emailAddress || {};
@@ -1260,6 +1272,7 @@ app.get("/api/inbox", async (_request, response) => {
 app.post("/api/inbox/sync", async (request, response) => {
   const db = await readDb();
   const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true, request, response });
+  const replyHints = normalizeReplyHints(request.body?.replyHints);
 
   if (!hasGraphConnection(runtimeConfig)) {
     return response.status(400).json({
@@ -1268,13 +1281,24 @@ app.post("/api/inbox/sync", async (request, response) => {
   }
 
   try {
-    const incoming = await fetchGraphInboxMessages(db, runtimeConfig, response);
-    const replyIndex = buildReplyMatchIndex(db);
+    const incoming = await fetchGraphInboxMessages(db, runtimeConfig, response, replyHints);
+    const replyIndex = buildReplyMatchIndex(db, replyHints);
     const previousMessages = db.inboxMessages || [];
-    const existingMessages = previousMessages.filter((message) => {
-      if (message.source !== "graph") return true;
-      return Boolean(matchCampaignReply(message, replyIndex));
-    });
+    const existingMessages = previousMessages
+      .map((message) => {
+        if (message.source === "manual") return message;
+        if (message.campaignName && (message.matchedSubject || message.sentAt)) return message;
+        const matched = matchCampaignReply(message, replyIndex);
+        return matched
+          ? {
+              ...message,
+              campaignName: matched.campaignName,
+              matchedSubject: matched.subject,
+              sentAt: matched.createdAt,
+            }
+          : null;
+      })
+      .filter(Boolean);
     const byId = new Map(existingMessages.map((message) => [message.id, message]));
     incoming.forEach((message) => byId.set(message.id, { ...byId.get(message.id), ...message }));
     db.inboxMessages = [...byId.values()].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 200);
