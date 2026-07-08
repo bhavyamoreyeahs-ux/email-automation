@@ -27,6 +27,7 @@ let config = { ...defaultConfig };
 const authSecret = process.env.AUTH_SECRET || "email-automation-local-auth-secret";
 const adminEmail = process.env.ADMIN_EMAIL || "bhavya.moreyeahs@gmail.com";
 const adminPassword = process.env.ADMIN_PASSWORD || "Letsgoo@000";
+const graphCookieName = "emailAutomationGraph";
 
 const emptyDb = {
   contacts: [],
@@ -130,6 +131,42 @@ function cookieValue(request, name) {
 function sessionCookie(token) {
   const secure = process.env.NODE_ENV === "production" || process.env.VERCEL ? " Secure;" : "";
   return `emailAutomationSession=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=${30 * 24 * 60 * 60}`;
+}
+
+function graphConnectionCookie(mailConfig = {}) {
+  const secure = process.env.NODE_ENV === "production" || process.env.VERCEL ? " Secure;" : "";
+  const token = signToken({
+    graphConnected: true,
+    graphEmail: normalizeEmail(mailConfig.graphEmail),
+    graphRefreshToken: mailConfig.graphRefreshToken || "",
+    fromName: mailConfig.fromName || "",
+    fromEmail: normalizeEmail(mailConfig.fromEmail || mailConfig.graphEmail),
+    replyTo: normalizeEmail(mailConfig.replyTo || mailConfig.graphEmail),
+    exp: Date.now() + 90 * 24 * 60 * 60 * 1000,
+  });
+  return `${graphCookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=${90 * 24 * 60 * 60}`;
+}
+
+function clearGraphConnectionCookie() {
+  const secure = process.env.NODE_ENV === "production" || process.env.VERCEL ? " Secure;" : "";
+  return `${graphCookieName}=; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=0`;
+}
+
+function graphConnectionFromRequest(request) {
+  const payload = verifyToken(decodeURIComponent(cookieValue(request, graphCookieName)));
+  if (!payload?.graphRefreshToken || !payload?.graphEmail) return {};
+  return {
+    graphConnected: true,
+    graphEmail: normalizeEmail(payload.graphEmail),
+    graphRefreshToken: payload.graphRefreshToken,
+    fromName: payload.fromName || "",
+    fromEmail: normalizeEmail(payload.fromEmail || payload.graphEmail),
+    replyTo: normalizeEmail(payload.replyTo || payload.graphEmail),
+  };
+}
+
+function mailConfigForRequest(request, db) {
+  return mergeConfig({ ...(db.mailConfig || {}), ...graphConnectionFromRequest(request) });
 }
 
 function requestTokens(request) {
@@ -316,7 +353,7 @@ async function requestGraphToken(params, runtimeConfig = config) {
   return payload;
 }
 
-async function refreshGraphTokens(db, runtimeConfig = mergeConfig(db.mailConfig || {})) {
+async function refreshGraphTokens(db, runtimeConfig = mergeConfig(db.mailConfig || {}), response = null) {
   if (!hasGraphApp(runtimeConfig) || !runtimeConfig.graphRefreshToken) {
     throw new Error("Microsoft Graph is not connected yet.");
   }
@@ -334,13 +371,18 @@ async function refreshGraphTokens(db, runtimeConfig = mergeConfig(db.mailConfig 
 
   db.mailConfig = {
     ...(db.mailConfig || {}),
+    fromName: runtimeConfig.fromName || db.mailConfig?.fromName || "",
+    fromEmail: runtimeConfig.fromEmail || runtimeConfig.graphEmail || db.mailConfig?.fromEmail || "",
+    replyTo: runtimeConfig.replyTo || runtimeConfig.graphEmail || db.mailConfig?.replyTo || "",
     graphConnected: true,
+    graphEmail: runtimeConfig.graphEmail,
     graphAccessToken: token.access_token,
     graphRefreshToken: token.refresh_token || runtimeConfig.graphRefreshToken,
     graphExpiresAt: Date.now() + Number(token.expires_in || 3600) * 1000,
   };
   await writeDb(db);
   config = mergeConfig(db.mailConfig);
+  if (response) response.setHeader("Set-Cookie", graphConnectionCookie(config));
   return mergeConfig(db.mailConfig);
 }
 
@@ -443,8 +485,8 @@ function matchCampaignReply(message, replyIndex) {
   }) || null;
 }
 
-async function fetchGraphInboxMessages(db) {
-  const runtimeConfig = await refreshGraphTokens(db);
+async function fetchGraphInboxMessages(db, runtimeConfig = mergeConfig(db.mailConfig || {}), response = null) {
+  runtimeConfig = await refreshGraphTokens(db, runtimeConfig, response);
   const payload = await graphFetch(
     `/users/${encodeURIComponent(runtimeConfig.graphEmail)}/mailFolders/inbox/messages?$top=100&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,receivedDateTime,body`,
     { headers: { Prefer: 'outlook.body-content-type="text"' } },
@@ -523,10 +565,11 @@ async function sendReplyEmail({ to, subject, text, runtimeConfig = config }) {
   throw new Error("Microsoft Graph mailbox is not connected. Connect Microsoft Graph from Mailbox before replying.");
 }
 
-async function runtimeConfigForRequest(db, override = {}, { refreshGraph = false } = {}) {
-  const runtimeConfig = mergeConfig({ ...(db.mailConfig || {}), ...(override || {}) });
+async function runtimeConfigForRequest(db, override = {}, { refreshGraph = false, request = null, response = null } = {}) {
+  const baseConfig = request ? mailConfigForRequest(request, db) : mergeConfig(db.mailConfig || {});
+  const runtimeConfig = mergeConfig({ ...baseConfig, ...(override || {}) });
   if (refreshGraph && hasGraphConnection(runtimeConfig)) {
-    const refreshedConfig = await refreshGraphTokens(db, runtimeConfig);
+    const refreshedConfig = await refreshGraphTokens(db, runtimeConfig, response);
     const graphEmail = normalizeEmail(refreshedConfig.graphEmail || "");
     if (graphEmail && (!normalizeEmail(refreshedConfig.fromEmail).includes("@") || !normalizeEmail(refreshedConfig.replyTo).includes("@"))) {
       db.mailConfig = {
@@ -536,6 +579,7 @@ async function runtimeConfigForRequest(db, override = {}, { refreshGraph = false
       };
       await writeDb(db);
       config = mergeConfig(db.mailConfig);
+      if (response) response.setHeader("Set-Cookie", graphConnectionCookie(config));
       return mergeConfig(db.mailConfig);
     }
     return refreshedConfig;
@@ -699,6 +743,7 @@ app.get("/api/microsoft/callback", async (request, response) => {
     };
     config = mergeConfig(db.mailConfig);
     await writeDb(db);
+    response.setHeader("Set-Cookie", graphConnectionCookie(config));
     response.redirect(`/mailbox.html?graph=connected&email=${encodeURIComponent(graphEmail)}`);
   } catch (callbackError) {
     response.redirect(`/mailbox.html?graph=error&message=${encodeURIComponent(callbackError.message || "Microsoft connection failed.")}`);
@@ -707,9 +752,9 @@ app.get("/api/microsoft/callback", async (request, response) => {
 
 app.use("/api", requireAuth);
 
-app.get("/api/microsoft/auth-url", async (_request, response) => {
+app.get("/api/microsoft/auth-url", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = mailConfigForRequest(request, db);
   if (!hasGraphApp(runtimeConfig)) {
     return response.status(400).json({
       message: "Microsoft Graph is not configured yet. Add MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT_ID, and BASE_URL/MICROSOFT_REDIRECT_URI in Vercel.",
@@ -744,12 +789,13 @@ app.post("/api/microsoft/disconnect", async (_request, response) => {
   };
   config = mergeConfig(db.mailConfig);
   await writeDb(db);
+  response.setHeader("Set-Cookie", clearGraphConnectionCookie());
   response.json({ graphConfigured: hasGraphApp(config), graphConnected: false, graphEmail: "" });
 });
 
-app.get("/api/status", async (_request, response) => {
+app.get("/api/status", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = mailConfigForRequest(request, db);
   const senderEmail = senderEmailFor(runtimeConfig);
   response.json({
     providerMode: providerMode(runtimeConfig),
@@ -769,9 +815,9 @@ app.get("/api/status", async (_request, response) => {
   });
 });
 
-app.get("/api/mail/config", async (_request, response) => {
+app.get("/api/mail/config", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = mailConfigForRequest(request, db);
   const senderEmail = senderEmailFor(runtimeConfig);
   response.json({
     fromName: runtimeConfig.fromName || "",
@@ -789,7 +835,7 @@ app.get("/api/mail/config", async (_request, response) => {
 app.post("/api/mail/profile", async (request, response) => {
   const db = await readDb();
   const incoming = request.body || {};
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = mailConfigForRequest(request, db);
 
   if (!hasGraphConnection(runtimeConfig)) {
     return response.status(400).json({
@@ -807,9 +853,19 @@ app.post("/api/mail/profile", async (request, response) => {
     return response.status(400).json({ message: senderEmailIssue(runtimeConfig) || "Sender email is missing or invalid." });
   }
 
-  db.mailConfig = { ...(db.mailConfig || {}), ...nextProfile };
+  db.mailConfig = {
+    ...(db.mailConfig || {}),
+    provider: "graph",
+    graphConnected: true,
+    graphEmail: runtimeConfig.graphEmail,
+    graphAccessToken: runtimeConfig.graphAccessToken || db.mailConfig?.graphAccessToken || "",
+    graphRefreshToken: runtimeConfig.graphRefreshToken || db.mailConfig?.graphRefreshToken || "",
+    graphExpiresAt: runtimeConfig.graphExpiresAt || db.mailConfig?.graphExpiresAt || 0,
+    ...nextProfile,
+  };
   config = mergeConfig(db.mailConfig);
   await writeDb(db);
+  response.setHeader("Set-Cookie", graphConnectionCookie(config));
   response.json({
     connected: Boolean(hasGraphConnection(config)),
     providerMode: providerMode(config),
@@ -866,7 +922,7 @@ app.get("/api/contacts", async (_request, response) => {
 
 app.post("/api/campaigns", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = mergeConfig(db.mailConfig || {});
+  const runtimeConfig = mailConfigForRequest(request, db);
   const campaign = {
     id: makeId("campaign"),
     ...request.body,
@@ -881,7 +937,7 @@ app.post("/api/campaigns", async (request, response) => {
 
 app.post("/api/automation/run", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true, request, response });
   const campaign = request.body.campaign;
   const issues = complianceIssues(campaign, runtimeConfig);
   if (issues.length) return response.status(400).json({ issues });
@@ -1016,7 +1072,7 @@ app.post("/api/automation/run", async (request, response) => {
 
 app.post("/api/followups/:id/push", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true, request, response });
   const event = db.events.find((item) => item.id === request.params.id) || request.body.event;
 
   if (!event) return response.status(404).json({ message: "Follow-up event not found." });
@@ -1031,7 +1087,7 @@ app.post("/api/followups/:id/push", async (request, response) => {
 
 app.post("/api/followups/process", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true, request, response });
   const due = db.events
     .filter((event) => event.type === "followup-scheduled" && event.scheduledAt && new Date(event.scheduledAt) <= new Date())
     .slice(0, Number(request.body.limit || 25));
@@ -1053,7 +1109,7 @@ app.post("/api/followups/process", async (request, response) => {
 
 app.post("/api/test/send", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true, request, response });
   const campaign = request.body.campaign;
   const recipients = Array.isArray(request.body.recipients)
     ? [...new Set(request.body.recipients.map(normalizeEmail).filter(Boolean))]
@@ -1203,7 +1259,7 @@ app.get("/api/inbox", async (_request, response) => {
 
 app.post("/api/inbox/sync", async (request, response) => {
   const db = await readDb();
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox);
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true, request, response });
 
   if (!hasGraphConnection(runtimeConfig)) {
     return response.status(400).json({
@@ -1212,7 +1268,7 @@ app.post("/api/inbox/sync", async (request, response) => {
   }
 
   try {
-    const incoming = await fetchGraphInboxMessages(db);
+    const incoming = await fetchGraphInboxMessages(db, runtimeConfig, response);
     const replyIndex = buildReplyMatchIndex(db);
     const previousMessages = db.inboxMessages || [];
     const existingMessages = previousMessages.filter((message) => {
@@ -1238,7 +1294,7 @@ app.post("/api/inbox/:id/reply", async (request, response) => {
   const message = db.inboxMessages?.find((item) => item.id === request.params.id) || request.body.message;
   if (!message) return response.status(404).json({ message: "Inbox message not found." });
 
-  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true });
+  const runtimeConfig = await runtimeConfigForRequest(db, request.body.mailbox, { refreshGraph: true, request, response });
   const body = String(request.body?.body || "").trim();
   const mode = request.body?.mode === "manual" ? "manual" : "auto";
   const draft = body;
