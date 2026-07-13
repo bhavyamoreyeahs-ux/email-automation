@@ -386,6 +386,21 @@ function parseRecipients(value) {
   return [...new Set(String(value || "").split(/[\n,;]/).map((email) => email.trim().toLowerCase()).filter(Boolean))];
 }
 
+function completeAuth(result = {}) {
+  setJson(sessionKey, { ...result.session, token: result.token });
+  const returnTo = localStorage.getItem(returnToKey);
+  localStorage.removeItem(returnToKey);
+  window.location.href = returnTo && returnTo !== "login.html" ? returnTo : "index.html";
+}
+
+document.querySelectorAll("[data-auth-panel]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const target = button.dataset.authPanel;
+    document.querySelectorAll("[data-auth-panel]").forEach((item) => item.classList.toggle("active", item === button));
+    document.querySelectorAll("[data-auth-panel-name]").forEach((panel) => panel.classList.toggle("active", panel.dataset.authPanelName === target));
+  });
+});
+
 document.querySelector("#loginForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -397,16 +412,46 @@ document.querySelector("#loginForm")?.addEventListener("submit", async (event) =
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         email: document.querySelector("#loginEmailInput").value.trim(),
-        workspace: document.querySelector("#workspaceNameInput").value.trim(),
         password: document.querySelector("#loginPasswordInput").value,
       }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.message || "Login failed.");
-    setJson(sessionKey, { ...result.session, token: result.token });
-    const returnTo = localStorage.getItem(returnToKey);
-    localStorage.removeItem(returnToKey);
-    window.location.href = returnTo && returnTo !== "login.html" ? returnTo : "index.html";
+    completeAuth(result);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(button, false);
+  }
+});
+
+document.querySelector("#signupForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type='submit']");
+  const password = document.querySelector("#signupPasswordInput").value;
+  const confirmPassword = document.querySelector("#signupConfirmPasswordInput").value;
+
+  if (password !== confirmPassword) {
+    showToast("Passwords do not match.");
+    return;
+  }
+
+  try {
+    setBusy(button, true, "Creating account...");
+    const response = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: document.querySelector("#signupEmailInput").value.trim(),
+        workspace: document.querySelector("#signupWorkspaceInput").value.trim(),
+        password,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message || "Account creation failed.");
+    showToast("Account created. Opening your workspace...");
+    completeAuth(result);
   } catch (error) {
     showToast(error.message);
   } finally {

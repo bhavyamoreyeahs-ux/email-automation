@@ -18,7 +18,7 @@
   </head>
   <body>
     <main class="standalone-page">
-      <section class="login-card">
+      <section class="login-card auth-card">
         <div class="brand login-brand">
           <div class="brand-mark">M</div>
           <div>
@@ -27,24 +27,46 @@
           </div>
         </div>
         <div>
-          <span class="eyebrow">Step 1</span>
-          <h1>Login to your workspace.</h1>
-          <p class="muted">Use your workspace credentials to access campaigns, mailbox settings, and automation controls.</p>
+          <span class="eyebrow">Workspace access</span>
+          <h1>Login or create your account.</h1>
+          <p class="muted">Create a workspace account, then use the same credentials to access campaigns, mailbox settings, and automation controls.</p>
         </div>
-        <form class="login-form" id="loginForm">
+
+        <div class="auth-tabs" role="tablist" aria-label="Account access">
+          <button class="auth-tab active" id="loginTabButton" type="button" data-auth-panel="login">Login</button>
+          <button class="auth-tab" id="signupTabButton" type="button" data-auth-panel="signup">Create account</button>
+        </div>
+
+        <form class="login-form auth-panel active" id="loginForm" data-auth-panel-name="login">
           <label>
-            Work email
+            Email
             <input id="loginEmailInput" type="email" placeholder="you@company.com" autocomplete="email" required />
           </label>
           <label>
-            Workspace name
-            <input id="workspaceNameInput" type="text" placeholder="Your company or campaign workspace" required />
+            Password
+            <input id="loginPasswordInput" type="password" placeholder="Your password" autocomplete="current-password" required />
+          </label>
+          <button class="primary-button full-width-button" type="submit">Continue to workspace</button>
+        </form>
+
+        <form class="login-form auth-panel" id="signupForm" data-auth-panel-name="signup">
+          <label>
+            Work email
+            <input id="signupEmailInput" type="email" placeholder="you@company.com" autocomplete="email" required />
           </label>
           <label>
-            Password
-            <input id="loginPasswordInput" type="password" placeholder="Workspace password" autocomplete="current-password" required />
+            Workspace name
+            <input id="signupWorkspaceInput" type="text" placeholder="Your company or campaign workspace" autocomplete="organization" required />
           </label>
-          <button class="primary-button full-width-button" type="submit">Continue to setup</button>
+          <label>
+            Create password
+            <input id="signupPasswordInput" type="password" placeholder="At least 8 characters" autocomplete="new-password" minlength="8" required />
+          </label>
+          <label>
+            Confirm password
+            <input id="signupConfirmPasswordInput" type="password" placeholder="Repeat password" autocomplete="new-password" minlength="8" required />
+          </label>
+          <button class="primary-button full-width-button" type="submit">Create account</button>
         </form>
       </section>
     </main>

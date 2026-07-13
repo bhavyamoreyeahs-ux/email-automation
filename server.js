@@ -28,8 +28,10 @@ const authSecret = process.env.AUTH_SECRET || "email-automation-local-auth-secre
 const adminEmail = process.env.ADMIN_EMAIL || "bhavya.moreyeahs@gmail.com";
 const adminPassword = process.env.ADMIN_PASSWORD || "Letsgoo@000";
 const graphCookieName = "emailAutomationGraph";
+const accountCookieName = "emailAutomationAccount";
 
 const emptyDb = {
+  users: [],
   contacts: [],
   campaigns: [],
   events: [],
@@ -133,6 +135,19 @@ function sessionCookie(token) {
   return `emailAutomationSession=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=${30 * 24 * 60 * 60}`;
 }
 
+function accountCookie(user = {}) {
+  const secure = process.env.NODE_ENV === "production" || process.env.VERCEL ? " Secure;" : "";
+  const token = signToken({
+    id: user.id,
+    email: normalizeEmail(user.email),
+    workspace: user.workspace || "My workspace",
+    passwordHash: user.passwordHash || "",
+    createdAt: user.createdAt || new Date().toISOString(),
+    exp: Date.now() + 365 * 24 * 60 * 60 * 1000,
+  });
+  return `${accountCookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=${365 * 24 * 60 * 60}`;
+}
+
 function graphConnectionCookie(mailConfig = {}) {
   const secure = process.env.NODE_ENV === "production" || process.env.VERCEL ? " Secure;" : "";
   const token = signToken({
@@ -185,12 +200,55 @@ function verifyRequestSession(request) {
 }
 
 function requireAuth(request, response, next) {
-  const publicPaths = new Set(["/api/auth/login", "/api/auth/session"]);
+  const publicPaths = new Set(["/api/auth/login", "/api/auth/signup", "/api/auth/session"]);
   if (publicPaths.has(request.path)) return next();
   const { session } = verifyRequestSession(request);
   if (!session) return response.status(401).json({ message: "Please login again to continue." });
   request.session = session;
   next();
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.scryptSync(String(password), salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash = "") {
+  const [salt, hash] = String(storedHash).split(":");
+  if (!salt || !hash) return false;
+  const actual = crypto.scryptSync(String(password), salt, 64).toString("hex");
+  return Buffer.byteLength(actual) === Buffer.byteLength(hash) && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(hash));
+}
+
+function accountFromRequest(request) {
+  const account = verifyToken(decodeURIComponent(cookieValue(request, accountCookieName)));
+  if (!account?.email || !account?.passwordHash) return null;
+  return {
+    id: account.id || makeId("user"),
+    email: normalizeEmail(account.email),
+    workspace: account.workspace || "My workspace",
+    passwordHash: account.passwordHash,
+    createdAt: account.createdAt || new Date().toISOString(),
+  };
+}
+
+function publicUser(user = {}) {
+  return {
+    id: user.id,
+    email: normalizeEmail(user.email),
+    workspace: user.workspace || "My workspace",
+    createdAt: user.createdAt,
+  };
+}
+
+function sessionForUser(user = {}) {
+  return {
+    id: user.id,
+    email: normalizeEmail(user.email),
+    workspace: user.workspace || "My workspace",
+    signedInAt: new Date().toISOString(),
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  };
 }
 
 function scoreContact(contact) {
@@ -649,29 +707,76 @@ function formatInboxError(error) {
   return `Inbox sync failed: ${message}`;
 }
 
-app.post("/api/auth/login", (request, response) => {
+app.post("/api/auth/signup", async (request, response) => {
   const email = normalizeEmail(request.body?.email);
   const password = String(request.body?.password || "");
-  const workspace = String(request.body?.workspace || "MoreYeahs workspace").trim();
+  const workspace = String(request.body?.workspace || "").trim();
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return response.status(400).json({ message: "Enter a valid email address." });
+  }
+  if (!workspace) {
+    return response.status(400).json({ message: "Workspace name is required." });
+  }
+  if (password.length < 8) {
+    return response.status(400).json({ message: "Password must be at least 8 characters." });
+  }
+
+  const db = await readDb();
+  const users = Array.isArray(db.users) ? db.users : [];
+  if (users.some((user) => normalizeEmail(user.email) === email) || normalizeEmail(adminEmail) === email) {
+    return response.status(409).json({ message: "An account already exists for this email. Login instead." });
+  }
+
+  const user = {
+    id: makeId("user"),
+    email,
+    workspace,
+    passwordHash: hashPassword(password),
+    createdAt: new Date().toISOString(),
+  };
+  db.users = [user, ...users];
+  await writeDb(db);
+
+  const session = sessionForUser(user);
+  const token = signToken(session);
+  response.setHeader("Set-Cookie", [sessionCookie(token), accountCookie(user)]);
+  response.status(201).json({ token, session: { ...publicUser(user), signedInAt: session.signedInAt } });
+});
+
+app.post("/api/auth/login", async (request, response) => {
+  const email = normalizeEmail(request.body?.email);
+  const password = String(request.body?.password || "");
 
   if (!email || !password) {
     return response.status(400).json({ message: "Email and password are required." });
   }
 
-  if (email !== normalizeEmail(adminEmail) || password !== adminPassword) {
+  const db = await readDb();
+  const users = Array.isArray(db.users) ? db.users : [];
+  const storedUser = users.find((user) => normalizeEmail(user.email) === email);
+  const cookieUser = accountFromRequest(request);
+  const user = storedUser || (normalizeEmail(cookieUser?.email) === email ? cookieUser : null);
+  const isAdmin = email === normalizeEmail(adminEmail) && password === adminPassword;
+
+  if (!isAdmin && (!user || !verifyPassword(password, user.passwordHash))) {
     return response.status(401).json({ message: "Invalid login credentials." });
   }
 
-  const session = {
-    email,
-    workspace,
-    signedInAt: new Date().toISOString(),
-    exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  };
-
+  const loginUser = isAdmin
+    ? {
+        id: "admin",
+        email,
+        workspace: String(request.body?.workspace || "MoreYeahs workspace").trim() || "MoreYeahs workspace",
+        createdAt: new Date().toISOString(),
+      }
+    : user;
+  const session = sessionForUser(loginUser);
   const token = signToken(session);
-  response.setHeader("Set-Cookie", sessionCookie(token));
-  response.json({ token, session: { email, workspace, signedInAt: session.signedInAt } });
+  const cookies = [sessionCookie(token)];
+  if (!isAdmin) cookies.push(accountCookie(loginUser));
+  response.setHeader("Set-Cookie", cookies);
+  response.json({ token, session: { ...publicUser(loginUser), signedInAt: session.signedInAt } });
 });
 
 app.get("/api/auth/session", (request, response) => {
