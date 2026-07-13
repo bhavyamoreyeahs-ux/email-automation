@@ -520,6 +520,7 @@ h3 {
 }
 
 .status-strip,
+.stats-grid,
 .main-grid,
 .lower-grid,
 .automation-grid {
@@ -638,6 +639,7 @@ h3 {
 }
 
 .status-strip article,
+.stat-card,
 .builder-panel,
 .preview-panel,
 .panel {
@@ -651,6 +653,7 @@ h3 {
 .builder-panel:hover,
 .preview-panel:hover,
 .panel:hover,
+.stat-card:hover,
 .status-strip article:hover {
   border-color: #c8d5e5;
 }
@@ -681,6 +684,92 @@ h3 {
   display: block;
   margin-top: 8px;
   font-size: 1.55rem;
+}
+
+.admin-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.stat-card {
+  padding: 18px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.stat-card span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.stat-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.admin-panel {
+  margin-bottom: 18px;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.admin-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  background: #f5f8fc;
+  color: #475569;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-snapshot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.admin-snapshot > div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 16px;
+}
+
+.admin-snapshot strong {
+  display: block;
+  margin: 7px 0;
+}
+
+.admin-snapshot p {
+  margin-bottom: 0;
+  color: var(--muted);
 }
 
 .main-grid {
@@ -1447,6 +1536,8 @@ textarea:focus {
   .lower-grid,
   .automation-grid,
   .journey-home-grid,
+  .admin-stats,
+  .admin-snapshot,
   .dashboard-grid,
   .dashboard-grid.wide {
     grid-template-columns: 1fr;
@@ -1481,6 +1572,7 @@ textarea:focus {
 
   .nav-list,
   .status-strip,
+  .admin-stats,
   .campaign-form,
   .mail-grid,
   .followup-grid,

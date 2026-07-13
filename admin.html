@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-JCJG2XRSLX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-JCJG2XRSLX');
+    </script>
+    <meta name="google-site-verification" content="FN8q_cRzami-imjBFoA-27eHn5DiVDtGQZen_pAkQ8s" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin - Registrations</title>
+    <link rel="stylesheet" href="styles.css?v=20260626d" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <div>
+            <strong>MoreYeahs</strong>
+            <span>AI Email Automation</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a href="index.html">Journey Home</a>
+          <details class="nav-dropdown">
+            <summary>Campaign Studio</summary>
+            <a href="setup.html">Setup</a>
+            <a href="mailbox.html">Mailbox</a>
+            <a href="audience.html">Audience</a>
+            <a href="campaign.html">Campaign</a>
+            <a href="launch.html">Launch</a>
+          </details>
+          <a href="dashboard.html">Dashboard</a>
+          <a href="inbox.html">Inbox</a>
+          <a class="active" href="admin.html">Admin</a>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Admin</span>
+            <h1>Registrations and workspace data.</h1>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost-button" id="refreshAdminButton" type="button">Refresh</button>
+          </div>
+        </header>
+
+        <section class="stats-grid admin-stats" id="adminStats" aria-label="Registration totals">
+          <article class="stat-card">
+            <span>Registrations</span>
+            <strong data-admin-total="registrations">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Contacts</span>
+            <strong data-admin-total="contacts">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Emails sent</span>
+            <strong data-admin-total="sent">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Replies</span>
+            <strong data-admin-total="replies">0</strong>
+          </article>
+        </section>
+
+        <section class="panel admin-panel">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Users</span>
+              <h2>Created accounts</h2>
+            </div>
+            <p class="muted" id="adminGeneratedAt">Loading registration data...</p>
+          </div>
+          <div class="table-scroll">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Workspace</th>
+                  <th>Created</th>
+                  <th>Last login</th>
+                </tr>
+              </thead>
+              <tbody id="registrationsTableBody">
+                <tr>
+                  <td colspan="4">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel admin-panel">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">System</span>
+              <h2>Mailbox and activity snapshot</h2>
+            </div>
+          </div>
+          <div class="admin-snapshot" id="adminSnapshot">
+            <p class="muted">Loading workspace snapshot...</p>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="flow.js?v=20260707j"></script>
+  </body>
+</html>

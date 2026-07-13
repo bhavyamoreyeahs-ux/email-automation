@@ -143,6 +143,7 @@ function accountCookie(user = {}) {
     workspace: user.workspace || "My workspace",
     passwordHash: user.passwordHash || "",
     createdAt: user.createdAt || new Date().toISOString(),
+    lastLoginAt: user.lastLoginAt || "",
     exp: Date.now() + 365 * 24 * 60 * 60 * 1000,
   });
   return `${accountCookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax;${secure} Max-Age=${365 * 24 * 60 * 60}`;
@@ -229,6 +230,7 @@ function accountFromRequest(request) {
     workspace: account.workspace || "My workspace",
     passwordHash: account.passwordHash,
     createdAt: account.createdAt || new Date().toISOString(),
+    lastLoginAt: account.lastLoginAt || "",
   };
 }
 
@@ -238,6 +240,7 @@ function publicUser(user = {}) {
     email: normalizeEmail(user.email),
     workspace: user.workspace || "My workspace",
     createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt,
   };
 }
 
@@ -248,6 +251,27 @@ function sessionForUser(user = {}) {
     workspace: user.workspace || "My workspace",
     signedInAt: new Date().toISOString(),
     exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  };
+}
+
+function isAdminSession(session = {}) {
+  return normalizeEmail(session.email) === normalizeEmail(adminEmail);
+}
+
+function requireAdmin(request, response, next) {
+  if (!isAdminSession(request.session)) {
+    return response.status(403).json({ message: "Admin access is required to view registrations." });
+  }
+  next();
+}
+
+function registrationSummary(user = {}) {
+  return {
+    id: user.id,
+    email: normalizeEmail(user.email),
+    workspace: user.workspace || "My workspace",
+    createdAt: user.createdAt || "",
+    lastLoginAt: user.lastLoginAt || "",
   };
 }
 
@@ -734,6 +758,7 @@ app.post("/api/auth/signup", async (request, response) => {
     workspace,
     passwordHash: hashPassword(password),
     createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
   };
   db.users = [user, ...users];
   await writeDb(db);
@@ -769,8 +794,13 @@ app.post("/api/auth/login", async (request, response) => {
         email,
         workspace: String(request.body?.workspace || "MoreYeahs workspace").trim() || "MoreYeahs workspace",
         createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
       }
     : user;
+  if (!isAdmin && storedUser) {
+    storedUser.lastLoginAt = new Date().toISOString();
+    await writeDb(db);
+  }
   const session = sessionForUser(loginUser);
   const token = signToken(session);
   const cookies = [sessionCookie(token)];
@@ -868,6 +898,32 @@ app.get("/api/microsoft/callback", async (request, response) => {
 });
 
 app.use("/api", requireAuth);
+
+app.get("/api/admin/registrations", requireAdmin, async (_request, response) => {
+  const db = await readDb();
+  const users = Array.isArray(db.users) ? db.users : [];
+  const sentTypes = new Set(["sent", "test-sent", "followup-sent"]);
+  const replyEmails = new Set((db.inboxMessages || []).map((message) => normalizeEmail(message.email)).filter(Boolean));
+  response.json({
+    generatedAt: new Date().toISOString(),
+    registrations: users.map(registrationSummary),
+    totals: {
+      registrations: users.length,
+      contacts: db.contacts.length,
+      campaigns: db.campaigns.length,
+      events: db.events.length,
+      sent: db.events.filter((event) => sentTypes.has(event.type)).length,
+      replies: replyEmails.size,
+      converted: db.contacts.filter(isConverted).length,
+    },
+    recentRegistrations: users.slice(0, 8).map(registrationSummary),
+    mailbox: {
+      providerMode: providerMode(mergeConfig(db.mailConfig || {})),
+      graphConnected: Boolean(db.mailConfig?.graphConnected),
+      graphEmail: normalizeEmail(db.mailConfig?.graphEmail || db.mailConfig?.fromEmail || ""),
+    },
+  });
+});
 
 app.get("/api/microsoft/auth-url", async (request, response) => {
   const db = await readDb();

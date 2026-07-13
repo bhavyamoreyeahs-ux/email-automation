@@ -213,6 +213,78 @@ function currentPage() {
   return window.location.pathname.split("/").pop() || "index.html";
 }
 
+function formatAdminDate(value) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function renderAdminTotals(totals = {}) {
+  document.querySelectorAll("[data-admin-total]").forEach((item) => {
+    const key = item.dataset.adminTotal;
+    item.textContent = Number(totals[key] || 0).toLocaleString();
+  });
+}
+
+async function renderAdminRegistrations() {
+  const tableBody = document.querySelector("#registrationsTableBody");
+  if (!tableBody) return;
+  const generatedAt = document.querySelector("#adminGeneratedAt");
+  const snapshot = document.querySelector("#adminSnapshot");
+
+  try {
+    const result = await apiFetch("/api/admin/registrations");
+    renderAdminTotals(result.totals || {});
+    if (generatedAt) generatedAt.textContent = `Last refreshed ${formatAdminDate(result.generatedAt)}`;
+
+    const registrations = result.registrations || [];
+    if (!registrations.length) {
+      tableBody.innerHTML = '<tr><td colspan="4">No accounts have been created yet.</td></tr>';
+    } else {
+      tableBody.innerHTML = registrations
+        .map((user) => `
+          <tr>
+            <td><strong>${escapeHtml(user.email)}</strong></td>
+            <td>${escapeHtml(user.workspace || "My workspace")}</td>
+            <td>${formatAdminDate(user.createdAt)}</td>
+            <td>${formatAdminDate(user.lastLoginAt)}</td>
+          </tr>
+        `)
+        .join("");
+    }
+
+    if (snapshot) {
+      const mailbox = result.mailbox || {};
+      const totals = result.totals || {};
+      snapshot.innerHTML = `
+        <div>
+          <span class="eyebrow">Mailbox</span>
+          <strong>${mailbox.graphConnected ? "Microsoft Graph connected" : "Mailbox not connected"}</strong>
+          <p>${escapeHtml(mailbox.graphEmail || "No connected sender email yet.")}</p>
+        </div>
+        <div>
+          <span class="eyebrow">Campaign data</span>
+          <strong>${Number(totals.campaigns || 0).toLocaleString()} campaigns</strong>
+          <p>${Number(totals.events || 0).toLocaleString()} activity records, ${Number(totals.converted || 0).toLocaleString()} converted leads.</p>
+        </div>
+      `;
+    }
+  } catch (error) {
+    tableBody.innerHTML = `<tr><td colspan="4">${escapeHtml(error.message)}</td></tr>`;
+    if (generatedAt) generatedAt.textContent = "Admin data unavailable.";
+    if (snapshot) snapshot.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`;
+  }
+}
+
 async function getProgress() {
   let apiAuthenticated = false;
   const status = await apiFetch("/api/status", { skipAuthRedirect: true })
@@ -251,6 +323,16 @@ async function enforceJourneyOrder() {
   if (page === "login.html") return;
 
   await hydrateSessionFromCookie();
+  if (page === "admin.html") {
+    if (!getJson(sessionKey)?.token) {
+      localStorage.setItem(returnToKey, `${page}${window.location.search || ""}`);
+      window.location.href = "login.html";
+      return;
+    }
+    renderAdminRegistrations();
+    return;
+  }
+
   const progress = await getProgress();
   if (!progress.loggedIn) {
     localStorage.setItem(returnToKey, `${page}${window.location.search || ""}`);
@@ -837,3 +919,14 @@ document.querySelector("#runAutomationButton")?.addEventListener("click", async 
 });
 document.querySelector("#refreshActivityButton")?.addEventListener("click", renderLaunchActivity);
 renderLaunchActivity();
+
+document.querySelector("#refreshAdminButton")?.addEventListener("click", async () => {
+  const button = document.querySelector("#refreshAdminButton");
+  try {
+    setBusy(button, true, "Refreshing...");
+    await renderAdminRegistrations();
+    showToast("Registration data refreshed.");
+  } finally {
+    setBusy(button, false);
+  }
+});
